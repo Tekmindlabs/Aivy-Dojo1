@@ -176,31 +176,44 @@ export async function searchSimilarContent({
     const client = await getMilvusClient();
     console.log('Milvus client connected for search');
 
-    if (!validateEmbedding(embedding)) {
-      throw new Error(`Invalid search embedding dimension: ${embedding.length}`);
+    // Verify embedding dimension
+    if (embedding.length !== 768) { // Change to 768 to match the collection dimension
+      const error = new Error(`Invalid search embedding dimension: ${embedding.length}`);
+      console.error('Search embedding validation failed:', error);
+      throw error;
     }
 
     const filter = `user_id == "${userId}" && content_type in ${JSON.stringify(contentTypes)}`;
     console.log('Applying search filter:', filter);
 
-    const results = await client.search({
+    const searchResult = await client.search({
       collection_name: 'content_vectors',
       vector: embedding,
       filter: filter,
       limit,
       output_fields: ['content_type', 'content_id', 'metadata'],
-      params: {
+      params: { 
         nprobe: 10,
         metric_type: 'L2'
       }
     });
 
+    // Add null check and ensure results is an array
+    if (!searchResult || !searchResult.results) {
+      console.warn('No results returned from search:', {
+        userId,
+        timestamp: new Date().toISOString()
+      });
+      return [];
+    }
+
     console.log('Search completed successfully:', {
-      resultCount: results.length,
+      resultCount: searchResult.results.length,
       timestamp: new Date().toISOString()
     });
 
-    return results.map(result => ({
+    // Map the results to the expected format
+    return searchResult.results.map(result => ({
       id: result.id,
       user_id: userId,
       content_type: result.content_type,
