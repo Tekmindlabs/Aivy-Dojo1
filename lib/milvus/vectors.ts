@@ -25,8 +25,69 @@ export async function insertVector({
   embedding: number[];
   metadata?: Record<string, any>;
 }): Promise<VectorResult> {
-  // [Previous implementation remains the same]
-  // ... existing implementation ...
+  try {
+    console.log('Starting vector insertion:', {
+      userId,
+      contentType,
+      contentId,
+      embeddingDimension: embedding.length,
+      metadataKeys: Object.keys(metadata)
+    });
+
+    const client = await getMilvusClient();
+    console.log('Milvus client connected successfully');
+
+    if (!validateEmbedding(embedding)) {
+      throw new Error(`Invalid embedding dimension: ${embedding.length}, expected 1024`);
+    }
+
+    const vectorId = uuidv4();
+    console.log('Generated vector ID:', vectorId);
+
+    const insertData = {
+      id: vectorId,
+      user_id: userId,
+      content_type: contentType,
+      content_id: contentId,
+      embedding: embedding,
+      metadata: JSON.stringify(metadata)
+    };
+
+    console.log('Preparing to insert vector data:', {
+      vectorId,
+      userId,
+      contentType,
+      contentId,
+      metadataSize: JSON.stringify(metadata).length
+    });
+
+    await client.insert({
+      collection_name: 'content_vectors',
+      data: [insertData]
+    });
+
+    console.log('Vector inserted successfully:', {
+      vectorId,
+      timestamp: new Date().toISOString()
+    });
+
+    return {
+      id: vectorId,
+      user_id: userId,
+      content_type: contentType,
+      content_id: contentId,
+      metadata: JSON.stringify(metadata)
+    };
+
+  } catch (error: unknown) {
+    console.error('Vector insertion failed:', {
+      error: error instanceof Error ? error.message : String(error),
+      userId,
+      contentId,
+      timestamp: new Date().toISOString()
+    });
+    throw error;
+  }
 }
 
 /**
@@ -52,14 +113,10 @@ export async function insertMemoryVector({
     const client = await getMilvusClient();
     console.log('Milvus client connected for memory insertion');
 
-    // Verify embedding dimension
-    if (values.length !== 1024) {
-      const error = new Error(`Invalid memory embedding dimension: ${values.length}, expected 1024`);
-      console.error('Memory embedding validation failed:', error);
-      throw error;
+    if (!validateEmbedding(values)) {
+      throw new Error(`Invalid memory embedding dimension: ${values.length}`);
     }
 
-    // Prepare memory insertion data
     const insertData = {
       id,
       embedding: values,
@@ -69,7 +126,6 @@ export async function insertMemoryVector({
       timestamp: metadata.timestamp
     };
 
-    // Perform memory insertion
     await client.insert({
       collection_name: 'memories',
       data: [insertData]
@@ -81,6 +137,8 @@ export async function insertMemoryVector({
       schemaName: metadata.schemaName,
       timestamp: new Date().toISOString()
     });
+
+    return;
 
   } catch (error: unknown) {
     console.error('Memory vector insertion failed:', {
@@ -106,9 +164,59 @@ export async function searchSimilarContent({
   embedding: number[];
   limit?: number;
   contentTypes?: string[];
-}) {
-  // [Previous implementation remains the same]
-  // ... existing implementation ...
+}): Promise<VectorResult[]> {
+  try {
+    console.log('Starting similarity search:', {
+      userId,
+      embeddingDimension: embedding.length,
+      limit,
+      contentTypes
+    });
+
+    const client = await getMilvusClient();
+    console.log('Milvus client connected for search');
+
+    if (!validateEmbedding(embedding)) {
+      throw new Error(`Invalid search embedding dimension: ${embedding.length}`);
+    }
+
+    const filter = `user_id == "${userId}" && content_type in ${JSON.stringify(contentTypes)}`;
+    console.log('Applying search filter:', filter);
+
+    const results = await client.search({
+      collection_name: 'content_vectors',
+      vector: embedding,
+      filter: filter,
+      limit,
+      output_fields: ['content_type', 'content_id', 'metadata'],
+      params: {
+        nprobe: 10,
+        metric_type: 'L2'
+      }
+    });
+
+    console.log('Search completed successfully:', {
+      resultCount: results.length,
+      timestamp: new Date().toISOString()
+    });
+
+    return results.map(result => ({
+      id: result.id,
+      user_id: userId,
+      content_type: result.content_type,
+      content_id: result.content_id,
+      metadata: result.metadata,
+      score: result.score
+    }));
+
+  } catch (error: unknown) {
+    console.error('Similarity search failed:', {
+      error: error instanceof Error ? error.message : String(error),
+      userId,
+      timestamp: new Date().toISOString()
+    });
+    throw error;
+  }
 }
 
 /**
@@ -137,21 +245,16 @@ export async function searchSimilarMemories(
     const client = await getMilvusClient();
     console.log('Milvus client connected for memory search');
 
-    // Verify embedding dimension
-    if (embedding.length !== 1024) {
-      const error = new Error(`Invalid memory search embedding dimension: ${embedding.length}`);
-      console.error('Memory search embedding validation failed:', error);
-      throw error;
+    if (!validateEmbedding(embedding)) {
+      throw new Error(`Invalid memory search embedding dimension: ${embedding.length}`);
     }
 
-    // Prepare memory search filter
     let filter = `user_id == "${filters.userId}"`;
     if (filters.schemaName) {
       filter += ` && schema_name == "${filters.schemaName}"`;
     }
     console.log('Applying memory search filter:', filter);
 
-    // Perform memory search
     const results = await client.search({
       collection_name: 'memories',
       vector: embedding,
@@ -211,19 +314,19 @@ export async function updateMemoryVector({
 
     const client = await getMilvusClient();
 
-    // Delete existing vector
-    await client.delete({
+    await client.deleteEntities({
       collection_name: 'memories',
       expr: `id == "${id}"`
     });
 
-    // Insert updated vector
     await insertMemoryVector({ id, values, metadata });
 
     console.log('Memory vector updated successfully:', {
       id,
       timestamp: new Date().toISOString()
     });
+
+    return;
 
   } catch (error: unknown) {
     console.error('Memory vector update failed:', {
