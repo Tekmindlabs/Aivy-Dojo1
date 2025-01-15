@@ -99,8 +99,8 @@ if (!messages?.length || !messages[messages.length - 1]?.content) {
 }
 
 // Add your new validation here
-const lastMessage = messages[messages.length - 1];
-if (!lastMessage?.content?.trim()) {
+const messageForValidation = messages[messages.length - 1];
+if (!messageForValidation?.content?.trim()) {
   return new Response(
     JSON.stringify({ error: "Message content cannot be empty" }),
     { status: 400 }
@@ -116,9 +116,8 @@ if (!lastMessage?.content?.trim()) {
         difficultyPreference: true,
         interests: true
       }
-    }).catch(error => {
+    }).catch((error: Error) => {
       console.error("Prisma query error:", error);
-      throw new Error("Database query failed");
     });
 
     if (!user) {
@@ -202,12 +201,12 @@ if (!lastMessage?.content?.trim()) {
       memoryService.addMemory(
         processedMessages,
         user.id,
-        {
+        JSON.stringify({
           emotionalState: response.emotionalState,
           learningStyle: user.learningStyle,
           difficultyPreference: user.difficultyPreference,
           interests: user.interests
-        }
+        })
       )
     ]);
 
