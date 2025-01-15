@@ -26,8 +26,47 @@ interface SearchResult {
 
 export class MemoryService {
   private async createEmbedding(content: string): Promise<number[]> {
-    const embedding = await getEmbedding(content);
-    return Array.from(embedding);
+    try {
+      if (!content?.trim()) {
+        console.warn('Attempting to create embedding with empty content');
+        throw new Error('Cannot create embedding from empty content');
+      }
+      const embedding = await getEmbedding(content);
+      return Array.from(embedding);
+    } catch (error) {
+      console.error('Error creating embedding:', error);
+      throw error;
+    }
+  }
+
+  private validateMessages(messages: Message[]): void {
+    if (!Array.isArray(messages) || messages.length === 0) {
+      throw new Error('Messages array cannot be empty');
+    }
+
+    const lastMessage = messages[messages.length - 1];
+    if (!lastMessage?.content?.trim()) {
+      throw new Error('Last message content cannot be empty');
+    }
+  }
+
+  private validateUserId(userId: string): void {
+    if (!userId?.trim()) {
+      throw new Error('User ID is required');
+    }
+  }
+
+  private validateSchemaName(schemaName: string): MemorySchema {
+    if (typeof schemaName !== 'string' || !schemaName.trim()) {
+      throw new Error(`Invalid schema name: ${JSON.stringify(schemaName)}`);
+    }
+
+    const schema = DEFAULT_MEMORY_SCHEMAS.find(s => s.name === schemaName);
+    if (!schema) {
+      throw new Error(`Schema ${schemaName} not found in DEFAULT_MEMORY_SCHEMAS`);
+    }
+
+    return schema;
   }
 
   async addMemory(
@@ -37,14 +76,10 @@ export class MemoryService {
     metadata: Record<string, any> = {}
   ): Promise<MemoryEntry> {
     try {
-      if (typeof schemaName !== 'string') {
-        throw new Error(`Invalid schema name: ${JSON.stringify(schemaName)}`);
-      }
-  
-      const schema = DEFAULT_MEMORY_SCHEMAS.find(s => s.name === schemaName);
-      if (!schema) {
-        throw new Error(`Schema ${schemaName} not found in DEFAULT_MEMORY_SCHEMAS`);
-      }
+      // Validate inputs
+      this.validateMessages(messages);
+      this.validateUserId(userId);
+      const schema = this.validateSchemaName(schemaName);
 
       const lastMessage = messages[messages.length - 1];
       const embedding = await this.createEmbedding(lastMessage.content);
@@ -62,6 +97,7 @@ export class MemoryService {
         embedding
       };
 
+      // Handle patch mode
       if (schema.updateMode === 'patch') {
         const existing = await this.getMemoryBySchema(userId, schemaName);
         if (existing) {
@@ -72,7 +108,7 @@ export class MemoryService {
         }
       }
 
-      // Update the insertVector call to match the expected parameters
+      // Store in vector database
       await insertVector({
         userId,
         contentType: 'memory',
@@ -91,48 +127,69 @@ export class MemoryService {
     }
   }
 
-  async searchMemories(
-    query: string,
-    userId: string,
-    schemaName?: string,
-    limit: number = 5
-  ): Promise<MemoryEntry[]> {
-    try {
-      const embedding = await this.createEmbedding(query);
-      
-      // Update searchSimilarContent call to match the expected parameters
-      const results = await searchSimilarContent({
-        userId,
-        embedding,
-        limit,
-        contentTypes: ['memory']
-      });
+  // lib/memory/memory-service.ts
 
-      // Type the results properly
-      return (results as SearchResult[]).map(result => ({
+async searchMemories(
+  query: string,
+  userId: string,
+  schemaName?: string,
+  limit: number = 5
+): Promise<MemoryEntry[]> {
+  try {
+    const embedding = await this.createEmbedding(query);
+    
+    // Update searchSimilarContent call to match the expected parameters
+    const results = await searchSimilarContent({
+      userId,
+      embedding,
+      limit,
+      contentTypes: ['memory']
+    });
+
+    // Properly parse and transform the results
+    return results.map(result => {
+      // Parse the metadata string into an object
+      const metadata = JSON.parse(result.metadata) as {
+        userId: string;
+        schemaName: string;
+        content: string;
+      };
+
+      return {
         id: result.id,
-        schemaName: result.metadata.schemaName,
-        content: JSON.parse(result.metadata.content),
-        userId: result.metadata.userId,
+        schemaName: metadata.schemaName,
+        content: JSON.parse(metadata.content),
+        userId: metadata.userId,
         timestamp: new Date(),
-        embedding: embedding // Include the search embedding
-      }));
-    } catch (error) {
-      console.error('Error searching memories:', error);
-      throw error;
-    }
+        embedding: embedding
+      };
+    });
+  } catch (error) {
+    console.error('Error searching memories:', error);
+    throw error;
   }
+}
 
   async getMemoryBySchema(
     userId: string,
     schemaName: string
   ): Promise<MemoryEntry | null> {
-    const memories = await this.searchMemories(
-      '',  // empty query
-      userId,
-      schemaName,
-      1
-    );
-    return memories[0] || null;
+    try {
+      // Validate inputs
+      this.validateUserId(userId);
+      this.validateSchemaName(schemaName);
+
+      // Use schema name as default query to improve relevance
+      const memories = await this.searchMemories(
+        schemaName,
+        userId,
+        schemaName,
+        1
+      );
+      return memories[0] || null;
+    } catch (error) {
+      console.error('Error getting memory by schema:', error);
+      throw error;
+    }
   }
 }

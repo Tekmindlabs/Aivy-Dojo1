@@ -123,7 +123,8 @@ if (!lastMessage?.content) {
 const relevantMemories = await memoryService.searchMemories(
   lastMessage.content,
   state.userId,
-  5
+  undefined, // schemaName parameter (optional)
+  5  // limit parameter
 );
 
         // Step 2: Emotional Analysis
