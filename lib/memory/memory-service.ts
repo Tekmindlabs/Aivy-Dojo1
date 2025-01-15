@@ -37,9 +37,13 @@ export class MemoryService {
     metadata: Record<string, any> = {}
   ): Promise<MemoryEntry> {
     try {
+      if (typeof schemaName !== 'string') {
+        throw new Error(`Invalid schema name: ${JSON.stringify(schemaName)}`);
+      }
+  
       const schema = DEFAULT_MEMORY_SCHEMAS.find(s => s.name === schemaName);
       if (!schema) {
-        throw new Error(`Schema ${schemaName} not found`);
+        throw new Error(`Schema ${schemaName} not found in DEFAULT_MEMORY_SCHEMAS`);
       }
 
       const lastMessage = messages[messages.length - 1];

@@ -177,7 +177,7 @@ export async function searchSimilarContent({
     console.log('Milvus client connected for search');
 
     // Verify embedding dimension
-    if (embedding.length !== 768) { // Change to 768 to match the collection dimension
+    if (embedding.length !== 1024) { 
       const error = new Error(`Invalid search embedding dimension: ${embedding.length}`);
       console.error('Search embedding validation failed:', error);
       throw error;
@@ -360,8 +360,11 @@ function validateEmbedding(embedding: number[]): boolean {
     return false;
   }
   
-  if (embedding.length !== 1024) {
-    console.error(`Invalid embedding dimension: ${embedding.length}`);
+  // Change this to match your Milvus collection dimension
+  const EXPECTED_DIMENSION = 1024; // or 1024, depending on your collection
+  
+  if (embedding.length !== EXPECTED_DIMENSION) {
+    console.error(`Invalid embedding dimension: ${embedding.length}, expected ${EXPECTED_DIMENSION}`);
     return false;
   }
   

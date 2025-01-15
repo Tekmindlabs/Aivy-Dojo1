@@ -1,4 +1,0 @@
-[submodule "proto"]
-	path = proto
-	url = https://github.com/milvus-io/milvus-proto.git
-	branch = 2.5
