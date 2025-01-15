@@ -3,17 +3,10 @@
 export const MEMORY_SCHEMAS = {
   USER: 'user',
   CHAT: 'chat',
+  CHAT_MEMORY: 'chat_memory',  // Add this line
   CONTEXT: 'context',
   EMOTIONAL_STATE: 'emotional_state'
 } as const;
-
-export interface MemorySchema {
-  name: string;
-  description: string;
-  updateMode: 'patch' | 'insert';
-  parameters: Record<string, any>;
-  systemPrompt?: string;
-}
 
 export const DEFAULT_MEMORY_SCHEMAS: MemorySchema[] = [
   {
@@ -57,6 +50,41 @@ export const DEFAULT_MEMORY_SCHEMAS: MemorySchema[] = [
         context: {
           type: "string",
           description: "Contextual information"
+        },
+        timestamp: {
+          type: "string",
+          description: "When this memory was created"
+        }
+      }
+    }
+  },
+  // Add this new schema
+  {
+    name: MEMORY_SCHEMAS.CHAT_MEMORY,
+    description: "Store chat memory with emotional context",
+    updateMode: "insert",
+    parameters: {
+      type: "object",
+      properties: {
+        messages: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              content: { type: "string" },
+              role: { type: "string" },
+              timestamp: { type: "string" }
+            }
+          },
+          description: "Array of chat messages"
+        },
+        emotionalState: {
+          type: "object",
+          description: "Emotional context of the conversation"
+        },
+        reactStep: {
+          type: "object",
+          description: "ReAct framework step information"
         },
         timestamp: {
           type: "string",

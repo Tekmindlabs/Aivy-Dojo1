@@ -29,6 +29,9 @@ export interface AgentState {
       emotional?: string;
       research?: string;
       validation?: string;
+      memories?: any[]; // Add this line
+      learningStyle?: string | null;
+      difficulty?: string | null;
     };
     recommendations?: string;
   };

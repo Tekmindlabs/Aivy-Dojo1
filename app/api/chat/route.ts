@@ -13,6 +13,15 @@ import { ChatHandler } from '@/lib/chat/chat-handler';
 
 
 // Type definitions
+// Add this interface at the top with other interfaces
+interface MemoryManager {
+  debounceTimeout: NodeJS.Timeout | null;
+  DEBOUNCE_TIME: number;
+  memoryService: MemoryService;
+  scheduleMemoryUpdate: (messages: Message[], userId: string) => Promise<void>;
+  getRelevantMemories: (content: string, userId: string, limit?: number) => Promise<any[]>;
+}
+
 interface SuccessResponse {
   success: true;
   emotionalState: EmotionalState;
@@ -160,40 +169,42 @@ if (!messageForValidation?.content?.trim()) {
     };
 
     // Process with hybrid agent
-    currentStep = STEPS.AGENT;
-    const initialState: HybridState = {
-      userId: user.id,
-      messages: processedMessages,
-      currentStep: "initial",
-      emotionalState: {
-        mood: "neutral",
-        confidence: "medium"
-      },
-      context: {
-        role: "tutor",
-        analysis: {
-          memories: memoryContext,
-          learningStyle: user.learningStyle,
-          difficulty: user.difficultyPreference
-        },
-        recommendations: ""
-      },
-      reactSteps: [],
-      processedTensors
-    };
-
-    const response = await hybridAgent.process(initialState);
-if (!response.success) {
-  throw new Error(response.error || "Processing failed");
-}
-
-// Add this memory addition code here
+    // Process with hybrid agent
+currentStep = STEPS.AGENT;
 const memoryContext = await memoryService.searchMemories(
   lastMessage.content,
   user.id,
   undefined,
   5
 );
+
+const initialState: HybridState = {
+  userId: user.id,
+  messages: processedMessages,
+  currentStep: "initial",
+  emotionalState: {
+    mood: "neutral",
+    confidence: "medium"
+  },
+  context: {
+    role: "tutor",
+    analysis: {
+      memories: memoryContext,
+      learningStyle: user.learningStyle,
+      difficulty: user.difficultyPreference
+    },
+    recommendations: ""
+  },
+  reactSteps: [],
+  processedTensors
+};
+
+const response = await hybridAgent.process(initialState);
+if (!response.success) {
+  throw new Error(response.error || "Processing failed");
+}
+
+
 
     // Parallel operations
     currentStep = STEPS.RESPONSE;
