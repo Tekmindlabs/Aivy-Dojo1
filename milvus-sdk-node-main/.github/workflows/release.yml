@@ -1,0 +1,31 @@
+name: Publish package to npm
+
+on:
+  release:
+    types: [released]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 19
+
+      - name: Install dependencies
+        run: yarn
+
+      - name: update submodules
+        run: |
+          git submodule init
+          yarn pre
+
+      - name: Build app
+        run: |
+          yarn build
+
+      - uses: JS-DevTools/npm-publish@v1
+        with:
+          token: ${{ secrets.NPM_TOKEN }}
