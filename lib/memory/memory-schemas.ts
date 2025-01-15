@@ -1,5 +1,12 @@
 // lib/memory/memory-schemas.ts
-
+export const MEMORY_SCHEMAS = {
+    EMOTIONAL_STATE: 'emotional_state',
+    CONTEXT: 'context',
+    REACT_STEP: 'react_step'
+  } as const;
+  
+  export type MemorySchemaName = keyof typeof MEMORY_SCHEMAS;
+  
 export interface MemorySchema {
     name: string;
     description: string;

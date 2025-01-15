@@ -3,6 +3,8 @@ import { createEmotionalAgent } from "./emotional-agent";
 import { MemoryService } from "../memory/memory-service";
 import { Message } from "@/types/chat";
 import { AgentState, EmotionalState, AgentRole } from "./agents";
+import { DEFAULT_MEMORY_SCHEMAS } from "../memory/memory-schemas";
+
 
 // Define base interfaces
 interface ReActStep {
@@ -177,11 +179,17 @@ const relevantMemories = await memoryService.searchMemories(
           }
         };
 
-        await memoryService.addMemory(
-          memoryEntry.messages,
-          state.userId,
-          memoryEntry.metadata
-        );
+        // Step 5: Store interaction
+await memoryService.addMemory(
+  state.messages,
+  state.userId,
+  DEFAULT_MEMORY_SCHEMAS[0].name, // Use the first default schema or specify which one you want
+  {
+    emotionalState: emotionalAnalysis.emotionalState,
+    context: state.context,
+    reactStep
+  }
+);
 
         const responseText = response.response.text();
 
