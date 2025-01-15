@@ -90,14 +90,22 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Message validation
     const { messages }: { messages: Message[] } = await req.json();
-    if (!messages?.length || !messages[messages.length - 1]?.content) {
-      return new Response(
-        JSON.stringify({ error: "Invalid message format - content is required" }), 
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
+if (!messages?.length || !messages[messages.length - 1]?.content) {
+  return new Response(
+    JSON.stringify({ error: "Invalid message format - content is required" }), 
+    { status: 400, headers: { 'Content-Type': 'application/json' } }
+  );
+}
+
+// Add your new validation here
+const lastMessage = messages[messages.length - 1];
+if (!lastMessage?.content?.trim()) {
+  return new Response(
+    JSON.stringify({ error: "Message content cannot be empty" }),
+    { status: 400 }
+  );
+}
 
     // Get user data
     const user = await prisma.user.findUnique({
