@@ -2,6 +2,23 @@ import { getMilvusClient } from './client';
 import { v4 as uuidv4 } from 'uuid';
 import { VectorResult } from '../knowledge/types';
 
+interface SearchResult {
+  id: string;
+  content_type: string;
+  content_id: string;
+  metadata: string;
+  score: number;
+}
+
+interface MemorySearchResult {
+  id: string;
+  user_id: string;
+  schema_name: string;
+  content: string;
+  timestamp: string;
+  score: number;
+}
+
 export interface MemoryVectorMetadata {
   userId: string;
   schemaName: string;
@@ -213,7 +230,7 @@ export async function searchSimilarContent({
     });
 
     // Map the results to the expected format
-    return searchResult.results.map(result => ({
+    return searchResult.results.map((result: SearchResult) => ({
       id: result.id,
       user_id: userId,
       content_type: result.content_type,
@@ -285,7 +302,7 @@ export async function searchSimilarMemories(
       timestamp: new Date().toISOString()
     });
 
-    return results.map(result => ({
+    return results.map((result: MemorySearchResult) => ({
       id: result.id,
       metadata: {
         userId: result.user_id,
@@ -327,7 +344,8 @@ export async function updateMemoryVector({
 
     const client = await getMilvusClient();
 
-    await client.deleteEntities({
+    // Replace deleteEntities with delete
+    await client.delete({
       collection_name: 'memories',
       expr: `id == "${id}"`
     });

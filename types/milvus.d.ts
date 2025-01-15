@@ -8,6 +8,10 @@ declare module '@zilliz/milvus2-sdk-node' {
     loadCollectionSync(params: LoadParams): Promise<void>;
     createIndex(params: IndexParams): Promise<void>;
     listCollections(): Promise<any[]>;
+    delete(params: {
+      collection_name: string;
+      expr: string;
+    }): Promise<void>;
   }
 
   export interface CollectionCreateParams {
