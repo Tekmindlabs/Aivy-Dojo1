@@ -9,8 +9,6 @@ import { AgentState, ReActStep, EmotionalState } from '@/lib/ai/agents';
 import { Message } from '@/types/chat';
 import { MemoryService } from '@/lib/memory/memory-service';
 import { EmbeddingModel } from '@/lib/knowledge/embeddings';
-import { ChatHandler } from '@/lib/chat/chat-handler';
-
 
 // Type definitions
 interface SuccessResponse {
@@ -138,7 +136,6 @@ if (!messageForValidation?.content?.trim()) {
     currentStep = STEPS.PROCESS;
     const memoryService = new MemoryService();
     const hybridAgent = createHybridAgent(model, memoryService);
-    const chatHandler = new ChatHandler(memoryService);
 
     // Process messages
     const processedMessages = messages.map(msg => ({
@@ -171,11 +168,7 @@ if (!messageForValidation?.content?.trim()) {
       },
       context: {
         role: "tutor",
-        analysis: {
-          memories: memoryContext,
-          learningStyle: user.learningStyle,
-          difficulty: user.difficultyPreference
-        },
+        analysis: {},
         recommendations: ""
       },
       reactSteps: [],
@@ -188,48 +181,49 @@ if (!response.success) {
 }
 
 // Add this memory addition code here
-const memoryContext = await memoryService.searchMemories(
-  lastMessage.content,
+const memoryResult = await memoryService.addMemory(
+  processedMessages,
   user.id,
-  undefined,
-  5
+  "chat_memory", // Use the schema name we defined
+  {
+    emotionalState: response.emotionalState,
+    learningStyle: user.learningStyle,
+    difficultyPreference: user.difficultyPreference,
+    interests: user.interests
+  }
 );
 
     // Parallel operations
     currentStep = STEPS.RESPONSE;
-    const [personalizedResponse] = await Promise.all([
-      model.generateContent({
-        contents: [{
-          role: 'user',
-          parts: [{
-            text: `
-              Context from previous interactions:
-              ${memoryContext.map(m => m.content).join('\n')}
-              
-              Given this response: "${response.response}"
-              Please adapt it for a ${user.learningStyle || 'general'} learner 
-              with ${user.difficultyPreference || 'moderate'} difficulty preference.
-              Consider their interests: ${user.interests?.join(', ') || 'general topics'}.
-              Current emotional state: ${response.emotionalState?.mood}, 
-              Confidence: ${response.emotionalState?.confidence}
-            `
-          }]
-        }]
-      }),
-      memoryService.addMemory(
-        processedMessages,
-        user.id,
-        "chat_memory",
-        {
-          emotionalState: response.emotionalState,
-          learningStyle: user.learningStyle,
-          difficultyPreference: user.difficultyPreference,
-          interests: user.interests,
-          memoryContext: memoryContext.map(m => m.id),
-          timestamp: new Date().toISOString()
-        }
-      )
-    ]);
+const [personalizedResponse] = await Promise.all([
+  model.generateContent({
+    contents: [{
+      role: 'user',
+      parts: [{
+        text: `
+          Given this response: "${response.response}"
+          Please adapt it for a ${user.learningStyle || 'general'} learner 
+          with ${user.difficultyPreference || 'moderate'} difficulty preference.
+          Consider their interests: ${user.interests?.join(', ') || 'general topics'}.
+          Current emotional state: ${response.emotionalState?.mood}, 
+          Confidence: ${response.emotionalState?.confidence}
+        `
+      }]
+    }]
+  }),
+  // Store memory
+  memoryService.addMemory(
+    processedMessages,
+    user.id,
+    "chat_memory", // Use the schema name instead of JSON.stringify
+    {
+      emotionalState: response.emotionalState,
+      learningStyle: user.learningStyle,
+      difficultyPreference: user.difficultyPreference,
+      interests: user.interests
+    }
+  )
+]);
 
 const finalResponse = personalizedResponse.response.text()
 .replace(/^\d+:/, '') // Remove numeric prefix
@@ -254,10 +248,6 @@ const finalResponse = personalizedResponse.response.text()
             learningStyle: user.learningStyle || null,
             difficulty: user.difficultyPreference || null,
             interests: user.interests || []
-          },
-          memoryContext: {
-            relatedMemories: memoryContext.map(m => m.id),
-            timestamp: new Date().toISOString()
           }
         } as ChatMetadata,
       },
