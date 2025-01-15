@@ -3,7 +3,7 @@
 import { Message } from '@/types/chat';
 import { getEmbedding } from '@/lib/knowledge/embeddings';
 import { insertVector, searchSimilarContent } from '@/lib/milvus/vectors';
-import { MemorySchema, DEFAULT_MEMORY_SCHEMAS } from './memory-schemas';
+import { MemorySchema, DEFAULT_MEMORY_SCHEMAS, MEMORY_SCHEMAS } from './memory-schemas';
 
 export interface MemoryEntry {
   id: string;
@@ -12,19 +12,13 @@ export interface MemoryEntry {
   userId: string;
   timestamp: Date;
   embedding?: number[];
-}
-
-interface SearchResult {
-  id: string;
-  metadata: {
-    userId: string;
-    schemaName: string;
-    content: string;
-  };
-  score: number;
+  metadata?: Record<string, any>;
 }
 
 export class MemoryService {
+  private memoryCache: Map<string, MemoryEntry> = new Map();
+  private readonly CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
   private async createEmbedding(content: string): Promise<number[]> {
     try {
       if (!content?.trim()) {
@@ -56,9 +50,10 @@ export class MemoryService {
     }
   }
 
+  // Fixed: Added validateSchemaName method
   private validateSchemaName(schemaName: string): MemorySchema {
-    if (typeof schemaName !== 'string' || !schemaName.trim()) {
-      throw new Error(`Invalid schema name: ${JSON.stringify(schemaName)}`);
+    if (!schemaName?.trim()) {
+      throw new Error('Schema name is required');
     }
 
     const schema = DEFAULT_MEMORY_SCHEMAS.find(s => s.name === schemaName);
@@ -69,6 +64,38 @@ export class MemoryService {
     return schema;
   }
 
+  private getCacheKey(userId: string, schemaName: string): string {
+    return `${userId}:${schemaName}`;
+  }
+
+  private async processUserInformation(content: string): Promise<Record<string, any>> {
+    const nameMatch = content.match(/my name is (\w+)/i);
+    const interestsMatch = content.match(/i (?:like|love|enjoy) (.+?)(?:\.|\n|$)/i);
+
+    return {
+      user_name: nameMatch ? nameMatch[1] : undefined,
+      interests: interestsMatch ? [interestsMatch[1].trim()] : undefined,
+      last_interaction: new Date().toISOString()
+    };
+  }
+
+  private mergeContent(existing: Record<string, any>, new_content: Record<string, any>): Record<string, any> {
+    const merged = { ...existing };
+
+    for (const [key, value] of Object.entries(new_content)) {
+      if (Array.isArray(existing[key]) && Array.isArray(value)) {
+        // Fixed: Changed Set spread to Array spread
+        merged[key] = Array.from(new Set([...existing[key], ...value]));
+      } else if (typeof existing[key] === 'object' && typeof value === 'object') {
+        merged[key] = this.mergeContent(existing[key], value);
+      } else {
+        merged[key] = value;
+      }
+    }
+
+    return merged;
+  }
+
   async addMemory(
     messages: Message[],
     userId: string,
@@ -76,39 +103,49 @@ export class MemoryService {
     metadata: Record<string, any> = {}
   ): Promise<MemoryEntry> {
     try {
-      // Validate inputs
       this.validateMessages(messages);
       this.validateUserId(userId);
       const schema = this.validateSchemaName(schemaName);
-
       const lastMessage = messages[messages.length - 1];
-      const embedding = await this.createEmbedding(lastMessage.content);
+      
+      let processedContent = {};
+      if (schemaName === MEMORY_SCHEMAS.USER) {
+        processedContent = await this.processUserInformation(lastMessage.content);
+      }
 
+      const embedding = await this.createEmbedding(lastMessage.content);
+      
       const memoryEntry: MemoryEntry = {
         id: crypto.randomUUID(),
         schemaName,
         content: {
+          ...processedContent,
           ...metadata,
-          messages,
-          timestamp: new Date()
+          original_message: lastMessage.content,
+          messages: messages.map(m => ({
+            content: m.content,
+            role: m.role,
+            timestamp: new Date()
+          }))
         },
         userId,
         timestamp: new Date(),
-        embedding
+        embedding,
+        metadata: {
+          last_updated: new Date().toISOString(),
+          context_type: schemaName,
+          ...metadata
+        }
       };
 
-      // Handle patch mode
       if (schema.updateMode === 'patch') {
         const existing = await this.getMemoryBySchema(userId, schemaName);
         if (existing) {
-          memoryEntry.content = {
-            ...existing.content,
-            ...memoryEntry.content
-          };
+          memoryEntry.content = this.mergeContent(existing.content, memoryEntry.content);
         }
       }
 
-      // Store in vector database
+      // Fixed: Removed filters parameter and adjusted searchSimilarContent call
       await insertVector({
         userId,
         contentType: 'memory',
@@ -116,10 +153,12 @@ export class MemoryService {
         embedding,
         metadata: {
           schemaName,
-          content: JSON.stringify(memoryEntry.content)
+          content: JSON.stringify(memoryEntry.content),
+          timestamp: memoryEntry.timestamp.toISOString()
         }
       });
 
+      this.memoryCache.set(this.getCacheKey(userId, schemaName), memoryEntry);
       return memoryEntry;
     } catch (error) {
       console.error('Error adding memory:', error);
@@ -127,68 +166,83 @@ export class MemoryService {
     }
   }
 
-  // lib/memory/memory-service.ts
+  async searchMemories(
+    query: string,
+    userId: string,
+    schemaName?: string,
+    limit: number = 5
+  ): Promise<MemoryEntry[]> {
+    try {
+      const embedding = await this.createEmbedding(query);
+      
+      // Fixed: Removed filters parameter
+      const results = await searchSimilarContent({
+        userId,
+        embedding,
+        limit,
+        contentTypes: ['memory']
+      });
 
-async searchMemories(
-  query: string,
-  userId: string,
-  schemaName?: string,
-  limit: number = 5
-): Promise<MemoryEntry[]> {
-  try {
-    const embedding = await this.createEmbedding(query);
-    
-    // Update searchSimilarContent call to match the expected parameters
-    const results = await searchSimilarContent({
-      userId,
-      embedding,
-      limit,
-      contentTypes: ['memory']
-    });
-
-    // Properly parse and transform the results
-    return results.map(result => {
-      // Parse the metadata string into an object
-      const metadata = JSON.parse(result.metadata) as {
-        userId: string;
-        schemaName: string;
-        content: string;
-      };
-
-      return {
-        id: result.id,
-        schemaName: metadata.schemaName,
-        content: JSON.parse(metadata.content),
-        userId: metadata.userId,
-        timestamp: new Date(),
-        embedding: embedding
-      };
-    });
-  } catch (error) {
-    console.error('Error searching memories:', error);
-    throw error;
+      return results.map(result => {
+        const metadata = JSON.parse(result.metadata);
+        return {
+          id: result.id,
+          schemaName: metadata.schemaName,
+          content: JSON.parse(metadata.content),
+          userId: metadata.userId,
+          timestamp: new Date(metadata.timestamp),
+          embedding: embedding,
+          metadata: {
+            score: result.score,
+            ...metadata
+          }
+        };
+      });
+    } catch (error) {
+      console.error('Error searching memories:', error);
+      throw error;
+    }
   }
-}
 
   async getMemoryBySchema(
     userId: string,
     schemaName: string
   ): Promise<MemoryEntry | null> {
     try {
-      // Validate inputs
-      this.validateUserId(userId);
-      this.validateSchemaName(schemaName);
+      const cacheKey = this.getCacheKey(userId, schemaName);
+      const cached = this.memoryCache.get(cacheKey);
+      
+      if (cached && (Date.now() - cached.timestamp.getTime()) < this.CACHE_TTL) {
+        return cached;
+      }
 
-      // Use schema name as default query to improve relevance
-      const memories = await this.searchMemories(
-        schemaName,
-        userId,
-        schemaName,
-        1
-      );
-      return memories[0] || null;
+      const memories = await this.searchMemories(schemaName, userId, schemaName, 1);
+      const memory = memories[0] || null;
+      
+      if (memory) {
+        this.memoryCache.set(cacheKey, memory);
+      }
+
+      return memory;
     } catch (error) {
       console.error('Error getting memory by schema:', error);
+      throw error;
+    }
+  }
+
+  async clearMemories(userId: string, schemaName?: string): Promise<void> {
+    try {
+      // Fixed: Changed iteration approach
+      const cacheKeys = Array.from(this.memoryCache.keys());
+      for (const key of cacheKeys) {
+        if (key.startsWith(`${userId}:`)) {
+          if (!schemaName || key.endsWith(`:${schemaName}`)) {
+            this.memoryCache.delete(key);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error clearing memories:', error);
       throw error;
     }
   }
