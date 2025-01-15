@@ -176,39 +176,54 @@ if (!messageForValidation?.content?.trim()) {
     };
 
     const response = await hybridAgent.process(initialState);
-    if (!response.success) {
-      throw new Error(response.error || "Processing failed");
-    }
+if (!response.success) {
+  throw new Error(response.error || "Processing failed");
+}
+
+// Add this memory addition code here
+const memoryResult = await memoryService.addMemory(
+  processedMessages,
+  user.id,
+  "chat_memory", // Use the schema name we defined
+  {
+    emotionalState: response.emotionalState,
+    learningStyle: user.learningStyle,
+    difficultyPreference: user.difficultyPreference,
+    interests: user.interests
+  }
+);
 
     // Parallel operations
     currentStep = STEPS.RESPONSE;
-    const [personalizedResponse, memoryResult] = await Promise.all([
-      model.generateContent({
-        contents: [{
-          role: 'user',
-          parts: [{
-            text: `
-              Given this response: "${response.response}"
-              Please adapt it for a ${user.learningStyle || 'general'} learner 
-              with ${user.difficultyPreference || 'moderate'} difficulty preference.
-              Consider their interests: ${user.interests?.join(', ') || 'general topics'}.
-              Current emotional state: ${response.emotionalState?.mood}, 
-              Confidence: ${response.emotionalState?.confidence}
-            `
-          }]
-        }]
-      }),
-      memoryService.addMemory(
-        processedMessages,
-        user.id,
-        JSON.stringify({
-          emotionalState: response.emotionalState,
-          learningStyle: user.learningStyle,
-          difficultyPreference: user.difficultyPreference,
-          interests: user.interests
-        })
-      )
-    ]);
+const [personalizedResponse] = await Promise.all([
+  model.generateContent({
+    contents: [{
+      role: 'user',
+      parts: [{
+        text: `
+          Given this response: "${response.response}"
+          Please adapt it for a ${user.learningStyle || 'general'} learner 
+          with ${user.difficultyPreference || 'moderate'} difficulty preference.
+          Consider their interests: ${user.interests?.join(', ') || 'general topics'}.
+          Current emotional state: ${response.emotionalState?.mood}, 
+          Confidence: ${response.emotionalState?.confidence}
+        `
+      }]
+    }]
+  }),
+  // Store memory
+  memoryService.addMemory(
+    processedMessages,
+    user.id,
+    "chat_memory", // Use the schema name instead of JSON.stringify
+    {
+      emotionalState: response.emotionalState,
+      learningStyle: user.learningStyle,
+      difficultyPreference: user.difficultyPreference,
+      interests: user.interests
+    }
+  )
+]);
 
 const finalResponse = personalizedResponse.response.text()
 .replace(/^\d+:/, '') // Remove numeric prefix

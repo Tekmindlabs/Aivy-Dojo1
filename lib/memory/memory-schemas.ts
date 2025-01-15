@@ -40,6 +40,20 @@ export interface MemorySchema {
       }
     },
     {
+      name: "chat_memory",
+      description: "Store chat interactions and emotional states",
+      updateMode: "insert",
+      parameters: {
+        emotionalState: {
+          mood: "string",
+          confidence: "string"
+        },
+        learningStyle: "string",
+        difficultyPreference: "string",
+        interests: "string[]"
+      }
+    },
+    {
       name: "Note",
       description: "Save notable memories the user has shared for later recall.",
       updateMode: "insert",
