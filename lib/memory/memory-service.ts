@@ -5,9 +5,10 @@ import { MemoryCache } from './cache/memory-cache';
 import { MemoryConsolidator } from './consolidation/memory-consolidator';
 import { MEMORY_CONFIG } from '../../config/memory-config';
 
-type MemoryTierType = 'core' | 'active' | 'background';
+export type MemoryTierType = 'core' | 'active' | 'background';
 
-interface Memory {
+export interface Memory {
+  // Required core fields
   id: string;
   content: string;
   embedding: number[];
@@ -16,10 +17,50 @@ interface Memory {
   importance: number;
   lastAccessed: number;
   accessCount: number;
+
+  // Extended metadata fields
   metadata: {
     emotional_value?: number;
     context_relevance?: number;
     source?: string;
+    // New metadata fields
+    tags?: string[];
+    category?: string;
+    confidence?: number;
+    relationships?: {
+      connectedMemories?: string[]; // IDs of related memories
+      strength?: number; // Connection strength (0-1)
+    };
+    userContext?: {
+      userId?: string;
+      sessionId?: string;
+      interactionType?: string;
+    };
+    processingMetadata?: {
+      compressionRatio?: number;
+      processingTimestamp?: number;
+      version?: string;
+    };
+  };
+
+  // Optional fields for enhanced functionality
+  summary?: string; // Condensed version of content
+  vectorMetadata?: {
+    dimensions?: number;
+    model?: string;
+    distance?: number; // For search results
+  };
+  
+  // Versioning and tracking
+  version?: number;
+  createdAt?: number;
+  updatedAt?: number;
+  
+  // Access control
+  permissions?: {
+    read?: string[];
+    write?: string[];
+    owner?: string;
   };
 }
 

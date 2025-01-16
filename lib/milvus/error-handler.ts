@@ -8,6 +8,13 @@ export class MilvusOperationError extends Error {
 export function handleMilvusError(error: any) {
   console.error('Milvus operation failed:', error);
 
+  if (error.message?.includes('nq')) {
+    throw new MilvusOperationError(
+      'Invalid search parameters: Missing or invalid nq parameter',
+      error
+    );
+  }
+
   if (error.code === 'ECONNREFUSED') {
     throw new MilvusOperationError(
       'Could not connect to Milvus server. Please ensure the server is running.',

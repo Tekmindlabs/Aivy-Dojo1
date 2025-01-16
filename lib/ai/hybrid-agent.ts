@@ -1,20 +1,23 @@
-// lib/ai/hybrid-agent.ts
-
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { createEmotionalAgent } from './emotional-agent';
-import { MemoryService } from '../memory/memory-service';
+import { MemoryService, Memory } from '../memory/memory-service';
 import { Message } from '@/types/chat';
 import { 
   AgentState, 
   EmotionalState, 
   AgentRole, 
   ReActStep,
-  HybridResponse 
+  AgentResponse 
 } from './agents';
-import { DEFAULT_MEMORY_SCHEMAS } from '../memory/memory-schemas';
+
+// Update HybridResponse to include userId
+export interface HybridResponse extends AgentResponse {
+  reactSteps: ReActStep[];
+  userId: string; // Add this line
+}
 
 export interface HybridState extends AgentState {
-  reactSteps: ReActStep[];  // Now ReActStep is properly typed
+  reactSteps: ReActStep[];
   userId: string;
   messages: Message[];
   processedTensors?: {
@@ -37,64 +40,59 @@ export const createHybridAgent = (model: any, memoryService: MemoryService) => {
           throw new Error('Invalid message content');
         }
 
-        // Get relevant memories
-        const memories = await memoryService.searchMemories(
+        // Update retrieve call to use correct number of arguments
+        const memories = await memoryService.retrieve(
           lastMessage.content,
-          state.userId,
-          undefined,
-          5
+          5  // Only pass query and limit
         );
 
-        // Process emotional state
+        // Rest of the code remains the same...
         const emotionalResult = await emotionalAgent(state);
         const emotionalState = emotionalResult.emotionalState;
 
-        // Execute ReAct step with memory context
-       
-const reactStep: ReActStep = {
-  thought: `Analyzing message with emotional state (${emotionalState.mood}) and confidence (${emotionalState.confidence})`,
-  action: 'Process message with memory context',
-  observation: `Found ${memories.length} relevant memories`,
-  response: await (async () => {
-    try {
-      const result = await model.generateContent({
-        contents: [{
-          role: 'user',
-          parts: [{
-            text: `
-              Context: User message with emotional state ${emotionalState.mood}
-              Relevant memories: ${memories.map(m => m.content).join('\n')}
-              Message: ${lastMessage.content}
+        const reactStep: ReActStep = {
+          thought: `Analyzing message with emotional state (${emotionalState.mood}) and confidence (${emotionalState.confidence})`,
+          action: 'Process message with memory context',
+          observation: `Found ${memories.length} relevant memories`,
+          response: await (async () => {
+            try {
+              const result = await model.generateContent({
+                contents: [{
+                  role: 'user',
+                  parts: [{
+                    text: `
+                      Context: User message with emotional state ${emotionalState.mood}
+                      Relevant memories: ${memories.map((m: Memory) => m.content).join('\n')}
+                      Message: ${lastMessage.content}
+                      
+                      Generate an appropriate response considering the emotional context and previous interactions.
+                    `
+                  }]
+                }]
+              });
               
-              Generate an appropriate response considering the emotional context and previous interactions.
-            `
-          }]
-        }]
-      });
-      
-      if (!result?.response) {
-        throw new Error('Model failed to generate response');
-      }
-      
-      return result.response.text();
-    } catch (error) {
-      console.error('Error generating content:', error);
-      throw new Error('Failed to generate response from model');
-    }
-  })()
-};
+              if (!result?.response) {
+                throw new Error('Model failed to generate response');
+              }
+              
+              return result.response.text();
+            } catch (error) {
+              console.error('Error generating content:', error);
+              throw new Error('Failed to generate response from model');
+            }
+          })()
+        };
 
-        // Store memory
-        await memoryService.addMemory(
-          state.messages,
-          state.userId,
-          'chat_memory',
-          {
-            emotionalState,
-            reactStep,
-            timestamp: new Date().toISOString()
+        await memoryService.store({
+          content: lastMessage.content,
+          timestamp: Date.now(),
+          metadata: {
+            emotional_value: emotionalState.mood === 'positive' ? 1 : 
+                           emotionalState.mood === 'negative' ? -1 : 0,
+            context_relevance: 1.0,
+            source: 'chat'
           }
-        );
+        });
 
         return {
           success: true,
@@ -103,7 +101,9 @@ const reactStep: ReActStep = {
           response: reactStep.response,
           timestamp: new Date().toISOString(),
           currentStep: state.currentStep,
-          userId: state.userId
+          userId: state.userId,
+          messages: state.messages,
+          context: state.context
         };
 
       } catch (error) {
@@ -114,7 +114,10 @@ const reactStep: ReActStep = {
           reactSteps: state.reactSteps || [],
           timestamp: new Date().toISOString(),
           currentStep: state.currentStep,
-          userId: state.userId
+          userId: state.userId,
+          messages: state.messages,
+          context: state.context,
+          emotionalState: state.emotionalState
         };
       }
     }

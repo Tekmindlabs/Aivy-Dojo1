@@ -37,6 +37,7 @@ interface VectorSearchParams {
   offset?: number;
   filter?: string;
   tierType?: MemoryTierType;
+  nq?: number; 
 }
 
 interface VectorInsertParams {
@@ -66,12 +67,20 @@ export class VectorOperations {
   }
 
   async searchVectors(params: VectorSearchParams): Promise<any[]> {
-    const { collection, vector, limit = 10, offset = 0, filter, tierType } = params;
+    const { 
+      collection, 
+      vector, 
+      limit = 10, 
+      offset = 0, 
+      filter, 
+      tierType,
+      nq = 1 // Add default value
+    } = params;
   
     const searchParams = {
       collection_name: collection,
-      vectors: [vector], // Ensure vector is wrapped in an array
-      nq: 1, // Add this line to specify number of queries
+      vectors: [vector],
+      nq: nq, // Ensure nq is included
       search_params: tierType ? 
         this.searchParamsByTier[tierType] : 
         this.searchParamsByTier.core,
@@ -122,8 +131,8 @@ export class VectorOperations {
   ): Promise<any[]> {
     const searchParams = {
       collection_name: `memory_${tierType}`,
-      vectors: [vector], // Ensure vector is wrapped in an array
-      nq: 1, // Add this line
+      vectors: [vector],
+      nq: 1, // Ensure nq is included
       search_params: this.searchParamsByTier[tierType],
       limit,
       filter,
