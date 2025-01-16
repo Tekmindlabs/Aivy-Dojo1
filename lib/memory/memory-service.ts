@@ -48,7 +48,25 @@ export class MemoryService {
     }
 
     this.tierManager = new MemoryTierManager(config);
-    this.compression = new MemoryCompression(config.compression);
+    this.compression = new MemoryCompression({
+      minSizeForCompression: config.compression.minSize,
+      compressionLevel: 6, // You can make this configurable if needed
+      optimizationThreshold: config.compression.targetRatio,
+      tierSpecificSettings: {
+        core: {
+          compressionRatio: config.tiers.core.compressionRatio || 1.0,
+          retentionPeriod: config.tiers.core.ttl
+        },
+        active: {
+          compressionRatio: config.tiers.active.compressionRatio || 0.8,
+          retentionPeriod: config.tiers.active.ttl
+        },
+        background: {
+          compressionRatio: config.tiers.background.compressionRatio || 0.6,
+          retentionPeriod: config.tiers.background.ttl
+        }
+      }
+    });
     this.cache = new MemoryCache();
     this.consolidator = new MemoryConsolidator();
   }

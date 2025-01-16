@@ -1,6 +1,6 @@
 import { MemoryTierType } from '../memory-schemas';
 import { LRUCache } from 'lru-cache';
-import { MemoryConfig } from '../../config/memory-config';
+import { MemoryConfig } from '../../../config/memory-config';
 
 interface CacheConfig {
   maxSize: {
@@ -42,7 +42,7 @@ export class MemoryCache {
         background: 100
       },
       ttl: {
-        core: Infinity,
+        core: 365 * 24 * 60 * 60 * 1000,
         active: 24 * 60 * 60 * 1000,
         background: 6 * 60 * 60 * 1000
       },

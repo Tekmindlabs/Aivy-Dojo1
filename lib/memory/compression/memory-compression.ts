@@ -212,7 +212,7 @@ export class MemoryCompression {
     return (
       compressionMetadata.compressedSize < threshold &&
       compressionMetadata.compressionRatio <= 
-        this.config.tierSpecificSettings[memory.tierType].compressionRatio
+        this.config.tierSpecificSettings[memory.tierType as MemoryTierType].compressionRatio
     );
   }
 

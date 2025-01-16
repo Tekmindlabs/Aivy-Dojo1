@@ -60,8 +60,10 @@ export const DEFAULT_CONFIG = {
   tiers: {
     core: {
       maxSize: 1000,
-      maxCapacity: 1000, // Add this
-      ttl: Infinity,
+      maxCapacity: 1000,
+      ttl: 365 * 24 * 60 * 60 * 1000, // Use this instead of Infinity
+      // or use a specific large number like:
+      // ttl: 365 * 24 * 60 * 60 * 1000, // 1 year in milliseconds
       importanceThreshold: 0.8,
       compressionRatio: 1.0,
       backupFrequency: 24 * 60 * 60 * 1000
