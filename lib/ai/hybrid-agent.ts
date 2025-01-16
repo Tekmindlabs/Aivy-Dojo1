@@ -116,7 +116,8 @@ export class HybridAgent {
         collection: 'memories',
         vector: messageEmbedding,
         limit: 5,
-        tierType: 'core'
+        tierType: 'core',
+        nq: 1  // Add this line - specifies that we're doing a single query
       });
 
       // 5. Process emotional state
