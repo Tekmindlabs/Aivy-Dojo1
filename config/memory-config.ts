@@ -6,8 +6,8 @@ import { MemoryTierType } from '../lib/memory/memory-schemas';
 // Configuration schema definitions
 const TierConfigSchema = z.object({
   maxSize: z.number().positive(),
-  maxCapacity: z.number().positive(), // Add this
-  ttl: z.number().nonnegative(),
+  maxCapacity: z.number().positive(),
+  ttl: z.number().int().positive(), // Update to ensure integer and positive
   importanceThreshold: z.number().min(0).max(1),
   compressionRatio: z.number().positive().optional(),
   backupFrequency: z.number().positive().optional()

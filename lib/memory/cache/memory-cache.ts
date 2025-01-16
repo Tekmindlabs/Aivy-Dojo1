@@ -1,5 +1,6 @@
 import { MemoryTierType } from '../memory-schemas';
-import { LRUCache, Options } from 'lru-cache';
+import { LRUCache } from 'lru-cache';
+import { MemoryConfig } from '../../config/memory-config';
 
 interface CacheConfig {
   maxSize: {
