@@ -80,7 +80,7 @@ export class VectorOperations {
     const searchParams = {
       collection_name: collection,
       vectors: [vector],
-      nq: nq, // Ensure nq is included
+      nq: 1, 
       search_params: tierType ? 
         this.searchParamsByTier[tierType] : 
         this.searchParamsByTier.core,
