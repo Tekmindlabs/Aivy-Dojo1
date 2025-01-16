@@ -1,5 +1,3 @@
-// memory-service.ts
-
 import { MilvusClient } from '@zilliz/milvus2-sdk-node';
 import { MemoryTier, MemoryTierManager } from './tiers/memory-tiers';
 import { MemoryCompression } from './compression/memory-compression';
@@ -41,7 +39,47 @@ export class MemoryService {
     this.consolidator = new MemoryConsolidator();
   }
 
-  // Store memory with tier management
+  // Added methods to fix memory manager integration
+  async getMemoriesByTier(tier: 'core' | 'active' | 'background'): Promise<Memory[]> {
+    return await this.milvusClient.query({
+      collection_name: `memory_${tier}`
+    });
+  }
+
+  async getMemories(): Promise<Memory[]> {
+    return await this.getAllMemories();
+  }
+
+  async update(memory: Memory): Promise<void> {
+    const compressed = await this.compression.compressMemory(memory);
+    await this.milvusClient.update({
+      collection_name: `memory_${memory.tierType}`,
+      data: compressed
+    });
+  }
+
+  async delete(id: string): Promise<void> {
+    for (const tier of ['core', 'active', 'background']) {
+      await this.milvusClient.delete({
+        collection_name: `memory_${tier}`,
+        filter: `id == "${id}"`
+      });
+    }
+  }
+
+  async getOldMemories(tier: 'core' | 'active' | 'background', maxAge: number): Promise<Memory[]> {
+    const cutoffTime = Date.now() - maxAge;
+    return await this.milvusClient.query({
+      collection_name: `memory_${tier}`,
+      filter: `timestamp < ${cutoffTime}`
+    });
+  }
+
+  async transitionMemoryTier(memory: Memory, newTier: MemoryTier['type']): Promise<void> {
+    await this.transitionTier(memory, newTier);
+  }
+
+  // Existing methods
   async store(memory: Partial<Memory>): Promise<string> {
     const importance = await this.scoreMemoryImportance(memory);
     const tierType = this.determineTierType(importance);
@@ -71,11 +109,9 @@ export class MemoryService {
     return newMemory.id;
   }
 
-  // Retrieve memory with tiered access
   async retrieve(query: string, limit: number = 5): Promise<Memory[]> {
     const results: Memory[] = [];
     
-    // Cascading search through tiers
     for (const tier of ['core', 'active', 'background']) {
       const tierResults = await this.searchTier(tier, query, limit - results.length);
       results.push(...tierResults);
@@ -83,13 +119,11 @@ export class MemoryService {
       if (results.length >= limit) break;
     }
 
-    // Update access metrics
     await this.updateAccessMetrics(results);
     
     return results;
   }
 
-  // Memory consolidation
   async consolidateMemories(): Promise<void> {
     const memories = await this.getAllMemories();
     const consolidatedMemories = await this.consolidator.consolidateMemories(memories);
@@ -102,7 +136,6 @@ export class MemoryService {
     }
   }
 
-  // Importance scoring
   private async scoreMemoryImportance(memory: Partial<Memory>): Promise<number> {
     const factors = {
       recency: this.calculateRecencyScore(memory.timestamp || Date.now()),
@@ -119,7 +152,6 @@ export class MemoryService {
     );
   }
 
-  // Tier transition
   private async transitionTier(memory: Memory, newTier: MemoryTier['type']): Promise<void> {
     await this.milvusClient.delete({
       collection_name: `memory_${memory.tierType}`,
@@ -136,14 +168,13 @@ export class MemoryService {
     }
   }
 
-  // Helper methods
   private calculateRecencyScore(timestamp: number): number {
     const age = Date.now() - timestamp;
-    return Math.exp(-age / (30 * 24 * 60 * 60 * 1000)); // 30-day decay
+    return Math.exp(-age / (30 * 24 * 60 * 60 * 1000));
   }
 
   private calculateAccessFrequency(accessCount: number): number {
-    return Math.min(accessCount / 100, 1); // Normalize to 0-1
+    return Math.min(accessCount / 100, 1);
   }
 
   private async updateAccessMetrics(memories: Memory[]): Promise<void> {

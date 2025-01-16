@@ -2,7 +2,7 @@ import { MemoryService } from '../memory/memory-service';
 import { MemoryTierType } from '../memory/memory-schemas';
 import { MemoryEvolution } from '../memory/evolution/memory-evolution';
 import { MemoryConsolidator } from '../memory/consolidation/memory-consolidator';
-import { MEMORY_CONFIG } from '../config/memory-config';
+import { MEMORY_CONFIG } from '../../config/memory-config';
 
 interface MemoryStats {
   totalMemories: number;
