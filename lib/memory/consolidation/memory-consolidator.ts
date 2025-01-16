@@ -37,9 +37,11 @@ export class MemoryConsolidator {
 
   constructor(config = MEMORY_CONFIG) {
     this.config = config;
-    this.consolidationThreshold = config.consolidation.threshold || 0.7;
+    // Use getConsolidationConfig() instead of direct property access
+    const consolidationConfig = config.getConsolidationConfig();
+    this.consolidationThreshold = consolidationConfig.threshold || 0.7;
     this.stats = this.initializeStats();
-  }
+}
 
   private initializeStats(): ConsolidationStats {
     return {
@@ -90,29 +92,30 @@ export class MemoryConsolidator {
     const clusters: MemoryCluster[] = [];
     
     for (const memory of memories) {
-      let addedToCluster = false;
-      
-      for (const cluster of clusters) {
-        if (await this.shouldAddToCluster(memory, cluster)) {
-          cluster.memories.push(memory);
-          cluster.importance = this.recalculateClusterImportance(cluster);
-          addedToCluster = true;
-          break;
+        let addedToCluster = false;
+        
+        for (const cluster of clusters) {
+            if (await this.shouldAddToCluster(memory, cluster)) {
+                cluster.memories.push(memory);
+                // Fix: Use calculateMergedImportance instead of recalculateClusterImportance
+                cluster.importance = this.calculateMergedImportance(cluster.memories);
+                addedToCluster = true;
+                break;
+            }
         }
-      }
 
-      if (!addedToCluster) {
-        clusters.push({
-          memories: [memory],
-          centerMemory: memory,
-          importance: memory.importance,
-          timestamp: memory.timestamp
-        });
-      }
+        if (!addedToCluster) {
+            clusters.push({
+                memories: [memory],
+                centerMemory: memory,
+                importance: memory.importance,
+                timestamp: memory.timestamp
+            });
+        }
     }
 
     return clusters;
-  }
+}
 
   private async mergeCluster(cluster: MemoryCluster): Promise<any | null> {
     try {
@@ -151,12 +154,14 @@ export class MemoryConsolidator {
 
   private calculateRecencyWeight(timestamp: number): number {
     const age = Date.now() - timestamp;
-    return Math.exp(-age / this.config.consolidation.recencyDecayRate);
-  }
+    const consolidationConfig = this.config.getConsolidationConfig();
+    return Math.exp(-age / consolidationConfig.recencyDecayRate);
+}
 
-  private calculateAccessWeight(accessCount: number): number {
-    return Math.min(accessCount / this.config.consolidation.maxAccessCount, 1);
-  }
+private calculateAccessWeight(accessCount: number): number {
+  const consolidationConfig = this.config.getConsolidationConfig();
+  return Math.min(accessCount / consolidationConfig.maxAccessCount, 1);
+}
 
   // Merging utilities
   private async mergeContents(memories: any[]): Promise<string> {

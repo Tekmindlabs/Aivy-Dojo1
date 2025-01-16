@@ -67,11 +67,25 @@ export class VectorOperations {
 
   async searchVectors(params: VectorSearchParams): Promise<any[]> {
     const { collection, vector, limit = 10, offset = 0, filter, tierType } = params;
-
-    if (tierType) {
-      return this.searchSingleTier(tierType, vector, limit, filter);
-    } else {
-      return this.searchAcrossTiers(vector, limit);
+  
+    const searchParams = {
+      collection_name: collection,
+      vectors: [vector], // Ensure vector is wrapped in an array
+      nq: 1, // Add this line to specify number of queries
+      search_params: tierType ? 
+        this.searchParamsByTier[tierType] : 
+        this.searchParamsByTier.core,
+      limit,
+      offset,
+      filter
+    };
+  
+    try {
+      const response = await this.client.search(searchParams);
+      return this.processSearchResults(response.results);
+    } catch (error) {
+      console.error('Error in vector search:', error);
+      throw error;
     }
   }
 
@@ -106,18 +120,23 @@ export class VectorOperations {
     limit: number,
     filter?: string
   ): Promise<any[]> {
-    const searchParams = this.searchParamsByTier[tierType];
-
-    const response = await this.client.search({
+    const searchParams = {
       collection_name: `memory_${tierType}`,
-      vectors: [vector],
-      search_params: searchParams,
+      vectors: [vector], // Ensure vector is wrapped in an array
+      nq: 1, // Add this line
+      search_params: this.searchParamsByTier[tierType],
       limit,
       filter,
       output_fields: ['*']
-    }) as SearchResponse;
-
-    return this.processSearchResults(response.results);
+    };
+  
+    try {
+      const response = await this.client.search(searchParams);
+      return this.processSearchResults(response.results);
+    } catch (error) {
+      console.error('Error in single tier search:', error);
+      throw error;
+    }
   }
 
   private async searchAcrossTiers(
@@ -157,9 +176,16 @@ export class VectorOperations {
     });
   }
 
-  async getCollectionStatistics(collection: string): Promise<any> {
-    return await this.client.getCollectionStatistics({
-      collection_name: collection
+  
+async getCollectionStats(collectionName: string) {
+  try {
+    const response = await this.client.describeCollection({
+      collection_name: collectionName
     });
+    return response.statistics || { row_count: 0 };
+  } catch (error) {
+    console.error('Error getting collection statistics:', error);
+    throw error;
   }
+}
 }
