@@ -1,218 +1,152 @@
+// lib/ai/hybrid-agent.ts
+
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { createEmotionalAgent } from "./emotional-agent";
-import { MemoryService } from "../memory/memory-service";
-import { Message } from "@/types/chat";
-import { AgentState, EmotionalState, AgentRole } from "./agents";
-import { DEFAULT_MEMORY_SCHEMAS } from "../memory/memory-schemas";
+import { createEmotionalAgent } from './emotional-agent';
+import { MemoryService } from '../memory/memory-service';
+import { Message } from '@/types/chat';
+import { 
+  AgentState, 
+  EmotionalState, 
+  AgentRole, 
+  ReActStep,
+  HybridResponse 
+} from './agents';
+import { MemoryTierType } from '../memory/memory-schemas';
 
-
-// Define base interfaces
-interface ReActStep {
-  thought: string;
-  action: string;
-  observation: string;
-  response?: string;
-}
-
-interface Memory {
-  id: string;
-  content: string;
-  emotionalState: EmotionalState;
-  timestamp: string;
-  userId: string;
-  metadata?: {
-    learningStyle?: string;
-    difficulty?: string;
-    interests?: string[];
-  };
-}
-
+// Extended HybridState interface to include userId
 export interface HybridState extends AgentState {
   reactSteps: ReActStep[];
-  currentStep: string;
   userId: string;
   messages: Message[];
-  context: {
-    role: AgentRole;
-    analysis: {
-      emotional?: any;
-      research?: any;
-      validation?: any;
-    };
-    recommendations: string;
-    previousMemories?: Memory[];
-  };
-  processedTensors?: {
-    embedding: number[];
-    input_ids: Float32Array;
-    attention_mask: Float32Array;
-    token_type_ids: Float32Array;
-  };
 }
 
-interface HybridResponse {
-  success: boolean;
-  emotionalState?: EmotionalState;
-  reactSteps?: ReActStep[];
-  response?: string;
-  error?: string;
-  timestamp: string;
-  currentStep: string;
+// Extended HybridResponse interface to include userId
+export interface ExtendedHybridResponse extends HybridResponse {
   userId: string;
+}
+
+interface MemoryMetadata {
+  emotionalState: EmotionalState;
+  reactStep: ReActStep;
+  timestamp: string;
+  contextRelevance?: number;
+  importanceScore?: number;
 }
 
 export const createHybridAgent = (model: any, memoryService: MemoryService) => {
   const emotionalAgent = createEmotionalAgent(model);
-  
-  const executeReActStep = async (
-    step: string, 
-    state: HybridState,
-    emotionalState: EmotionalState,
-    memories: any[]
-  ): Promise<ReActStep> => {
-    const prompt = `
-      As an emotionally intelligent AI tutor:
-      
-      Current Context:
-      - Emotional State: ${emotionalState.mood}
-      - Confidence Level: ${emotionalState.confidence}
-      - Previous Steps: ${state.reactSteps?.length || 0}
-      
-      Previous Interactions:
-      ${memories.map(m => `- ${m.content || m.text} (Emotional State: ${m.emotionalState?.mood || 'Unknown'})`).join('\n')}
-      
-      Thought Process:
-      1. Consider emotional state and learning needs
-      2. Review previous interactions and patterns
-      3. Plan appropriate response strategy
-      4. Evaluate potential impact
-      
-      Current Step: ${step}
-      
-      Provide:
-      1. Your thought process
-      2. Next action to take
-      3. What you observe from the results
-    `;
 
-    const result = await model.generateContent({
-      contents: [{
-        role: "user",
-        parts: [{ text: prompt }]
-      }]
-    });
-    
-    const response = result.response.text();
-    const [thought, action, observation] = response.split('\n\n');
-    
-    return {
-      thought: thought.replace('Thought: ', '').trim(),
-      action: action.replace('Action: ', '').trim(),
-      observation: observation.replace('Observation: ', '').trim()
-    };
+  const calculateContextRelevance = (memories: any[]): number => {
+    // Implementation for context relevance calculation
+    return memories.length > 0 ? 0.8 : 0.5;
+  };
+
+  const calculateImportance = (state: HybridState): number => {
+    // Implementation for importance calculation
+    return state.emotionalState.confidence === 'high' ? 0.9 : 0.7;
+  };
+
+  const determineTierType = (metadata: MemoryMetadata): MemoryTierType => {
+    const importance = metadata.importanceScore || 0.5;
+    if (importance > 0.8) return 'core';
+    if (importance > 0.5) return 'active';
+    return 'background';
   };
 
   return {
-    process: async (state: HybridState): Promise<HybridResponse> => {
+    async process(state: HybridState): Promise<ExtendedHybridResponse> {
       try {
+        // Validate last message
         const lastMessage = state.messages[state.messages.length - 1];
-if (!lastMessage?.content) {
-  throw new Error("Invalid message format - content is required");
-}
+        if (!lastMessage?.content?.trim()) {
+          throw new Error('Invalid message content');
+        }
 
-const relevantMemories = await memoryService.searchMemories(
-  lastMessage.content,
-  state.userId,
-  undefined, // schemaName parameter (optional)
-  5  // limit parameter
-);
-
-        // Step 2: Emotional Analysis
-        const emotionalAnalysis = await emotionalAgent({
-          ...state,
-          context: {
-            ...state.context,
-            previousMemories: relevantMemories
-          }
-        });
-        
-        // Step 3: ReAct Planning
-        const reactStep = await executeReActStep(
-          state.currentStep,
-          state,
-          emotionalAnalysis.emotionalState,
-          relevantMemories
+        // Get relevant memories using memory service's retrieve method
+        const memories = await memoryService.retrieve(
+          lastMessage.content,
+          5
         );
-        
-        // Step 4: Generate Response
-        const responsePrompt = `
-          Context:
-          - Emotional Analysis: ${JSON.stringify(emotionalAnalysis)}
-          - Reasoning Steps: ${JSON.stringify(reactStep)}
-          - Previous Interactions: ${JSON.stringify(relevantMemories)}
-          
-          User Message: ${lastMessage.content}
-          
-          Generate a supportive and personalized response that:
-          1. Acknowledges the user's emotional state
-          2. Addresses their specific needs
-          3. Provides clear and actionable guidance
-        `;
 
-        const response = await model.generateContent({
-          contents: [{ 
-            role: "user", 
-            parts: [{ text: responsePrompt }]
-          }]
-        });
+        // Process emotional state
+        const emotionalResult = await emotionalAgent(state);
+        const emotionalState = emotionalResult.emotionalState;
 
-        // Step 5: Store interaction
-        const memoryEntry = {
-          messages: state.messages.map(msg => ({
-            content: msg.content,
-            role: msg.role,
-            createdAt: new Date().toISOString()
-          })),
-          metadata: {
-            emotionalState: emotionalAnalysis.emotionalState,
-            context: state.context,
-            reactStep
-          }
+        // Execute ReAct step with memory context
+        const reactStep: ReActStep = {
+          thought: `Analyzing message with emotional state (${emotionalState.mood}) and confidence (${emotionalState.confidence})`,
+          action: 'Process message with memory context',
+          observation: `Found ${memories.length} relevant memories`,
+          response: await (async () => {
+            try {
+              const result = await model.generateContent({
+                contents: [{
+                  role: 'user',
+                  parts: [{
+                    text: `
+                      Context: User message with emotional state ${emotionalState.mood}
+                      Relevant memories: ${memories.map(m => m.content).join('\n')}
+                      Message: ${lastMessage.content}
+                      
+                      Generate an appropriate response considering the emotional context and previous interactions.
+                    `
+                  }]
+                }]
+              });
+              
+              if (!result?.response) {
+                throw new Error('Model failed to generate response');
+              }
+              
+              return result.response.text();
+            } catch (error) {
+              console.error('Error generating content:', error);
+              throw new Error('Failed to generate response from model');
+            }
+          })()
         };
 
-        // Step 5: Store interaction
-await memoryService.addMemory(
-  state.messages,
-  state.userId,
-  DEFAULT_MEMORY_SCHEMAS[0].name, // Use the first default schema or specify which one you want
-  {
-    emotionalState: emotionalAnalysis.emotionalState,
-    context: state.context,
-    reactStep
-  }
-);
+        // Create memory metadata
+        const memoryMetadata: MemoryMetadata = {
+          emotionalState,
+          reactStep,
+          timestamp: new Date().toISOString(),
+          contextRelevance: calculateContextRelevance(memories),
+          importanceScore: calculateImportance(state)
+        };
 
-        const responseText = response.response.text();
+        // Store memory using memory service's store method
+        await memoryService.store({
+          content: lastMessage.content,
+          userId: state.userId,
+          tierType: determineTierType(memoryMetadata),
+          metadata: memoryMetadata
+        });
 
         return {
           success: true,
-          emotionalState: emotionalAnalysis.emotionalState,
+          emotionalState,
           reactSteps: [...(state.reactSteps || []), reactStep],
-          response: responseText,
+          response: reactStep.response,
           timestamp: new Date().toISOString(),
           currentStep: state.currentStep,
+          messages: state.messages,
+          context: state.context,
           userId: state.userId
         };
 
       } catch (error) {
-        console.error("Hybrid agent error:", error);
+        console.error('Error in hybrid agent:', error);
         return {
           success: false,
           error: error instanceof Error ? error.message : 'Unknown error',
           reactSteps: state.reactSteps || [],
+          timestamp: new Date().toISOString(),
           currentStep: state.currentStep,
-          userId: state.userId,
-          timestamp: new Date().toISOString()
+          messages: state.messages,
+          context: state.context,
+          emotionalState: state.emotionalState,
+          userId: state.userId
         };
       }
     }
