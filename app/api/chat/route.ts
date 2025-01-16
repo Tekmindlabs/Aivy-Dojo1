@@ -23,6 +23,7 @@ const calculateImportance = (response: any): number => {
 
 // Type definitions
 interface ChatMetadata {
+  [key: string]: any; // Add index signature
   emotionalState: EmotionalState | null;
   reactSteps: Array<{
     thought: string;
@@ -178,23 +179,28 @@ export async function POST(req: NextRequest) {
           }]
         }]
       }),
-      // Store memory with new structure
       memoryService.store({
         content: lastMessage.content,
         userId: user.id,
         tierType: 'active',
         metadata: {
-          emotionalState: response.emotionalState,
-          learningStyle: user.learningStyle,
-          difficultyPreference: user.difficultyPreference,
-          interests: user.interests,
-          contextRelevance: calculateContextRelevance(memoryContext),
-          importanceScore: calculateImportance(response),
-          timestamp: new Date().toISOString()
+          emotional_value: response.emotionalState?.confidence === 'high' ? 0.9 : 0.7,
+          context_relevance: calculateContextRelevance(memoryContext),
+          confidence: calculateImportance(response),
+          tags: user.interests,
+          category: 'chat',
+          userContext: {
+            userId: user.id,
+            learningStyle: user.learningStyle,
+            difficultyPreference: user.difficultyPreference
+          },
+          processingMetadata: {
+            processingTimestamp: Date.now(),
+            version: '1.0'
+          }
         }
       })
-    ]);
-
+    ]); // Close Promise.all here
     const finalResponse = personalizedResponse.response.text()
       .replace(/^\d+:/, '')
       .replace(/\\n/g, '\n')
@@ -206,7 +212,7 @@ export async function POST(req: NextRequest) {
         userId: user.id,
         message: lastMessage.content,
         response: finalResponse,
-        metadata: {
+        metadata: JSON.parse(JSON.stringify({
           emotionalState: response.emotionalState || null,
           reactSteps: response.reactSteps?.map(step => ({
             thought: step.thought,
@@ -225,7 +231,7 @@ export async function POST(req: NextRequest) {
             timestamp: new Date().toISOString(),
             relatedMemories: memoryContext.map(m => m.id)
           }
-        } as ChatMetadata,
+        })) as ChatMetadata,
       },
     });
 

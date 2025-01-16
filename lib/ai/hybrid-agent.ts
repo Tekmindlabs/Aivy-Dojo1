@@ -15,6 +15,75 @@ import { MilvusSearchWrapper } from '../milvus/search-wrapper';
 import { getMilvusClient } from '../milvus/client';
 import { getEmbedding } from '../knowledge/embeddings';
 
+[{
+	"resource": "/d:/Learning Q1 2025/Jan/Aivy-Dojo1/app/api/chat/route.ts",
+	"owner": "typescript",
+	"code": "2459",
+	"severity": 8,
+	"message": "Module '\"@/lib/ai/hybrid-agent\"' declares 'HybridState' locally, but it is not exported.",
+	"source": "ts",
+	"startLineNumber": 7,
+	"startColumn": 29,
+	"endLineNumber": 7,
+	"endColumn": 40,
+	"relatedInformation": [
+		{
+			"startLineNumber": 11,
+			"startColumn": 3,
+			"endLineNumber": 11,
+			"endColumn": 14,
+			"message": "'HybridState' is declared here.",
+			"resource": "/d:/Learning Q1 2025/Jan/Aivy-Dojo1/lib/ai/hybrid-agent.ts"
+		}
+	]
+},{
+	"resource": "/d:/Learning Q1 2025/Jan/Aivy-Dojo1/app/api/chat/route.ts",
+	"owner": "typescript",
+	"code": "2353",
+	"severity": 8,
+	"message": "Object literal may only specify known properties, and 'emotionalState' does not exist in type '{ emotional_value?: number | undefined; context_relevance?: number | undefined; source?: string | undefined; tags?: string[] | undefined; category?: string | undefined; confidence?: number | undefined; relationships?: { ...; } | undefined; userContext?: { ...; } | undefined; processingMetadata?: { ...; } | undefined...'.",
+	"source": "ts",
+	"startLineNumber": 187,
+	"startColumn": 11,
+	"endLineNumber": 187,
+	"endColumn": 25,
+	"relatedInformation": [
+		{
+			"startLineNumber": 22,
+			"startColumn": 3,
+			"endLineNumber": 22,
+			"endColumn": 11,
+			"message": "The expected type comes from property 'metadata' which is declared here on type 'Partial<Memory>'",
+			"resource": "/d:/Learning Q1 2025/Jan/Aivy-Dojo1/lib/memory/memory-service.ts"
+		}
+	]
+},{
+	"resource": "/d:/Learning Q1 2025/Jan/Aivy-Dojo1/app/api/chat/route.ts",
+	"owner": "typescript",
+	"code": "2322",
+	"severity": 8,
+	"message": "Type 'ChatMetadata' is not assignable to type 'NullableJsonNullValueInput | InputJsonValue | undefined'.\n  Type 'ChatMetadata' is not assignable to type 'InputJsonObject'.\n    Index signature for type 'string' is missing in type 'ChatMetadata'.",
+	"source": "ts",
+	"startLineNumber": 209,
+	"startColumn": 9,
+	"endLineNumber": 209,
+	"endColumn": 17,
+	"relatedInformation": [
+		{
+			"startLineNumber": 12938,
+			"startColumn": 5,
+			"endLineNumber": 12938,
+			"endColumn": 13,
+			"message": "The expected type comes from property 'metadata' which is declared here on type '(Without<ChatCreateInput, ChatUncheckedCreateInput> & ChatUncheckedCreateInput) | (Without<...> & ChatCreateInput)'",
+			"resource": "/d:/Learning Q1 2025/Jan/Aivy-Dojo1/node_modules/.prisma/client/index.d.ts"
+		}
+	]
+}]
+
+export const createHybridAgent = (model: any, memoryService: MemoryService) => {
+  return new HybridAgent(model, memoryService);
+};
+
 export class HybridAgent {
   private emotionalAgent: ReturnType<typeof createEmotionalAgent>;
   private memoryService: MemoryService;
