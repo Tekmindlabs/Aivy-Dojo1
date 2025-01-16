@@ -4,22 +4,7 @@ import { MemoryEvolution } from '../memory/evolution/memory-evolution';
 import { MemoryConsolidator } from '../memory/consolidation/memory-consolidator';
 import { MEMORY_CONFIG } from '../../config/memory-config';
 
-interface MemoryConfig {
-  tiers: {
-    activeThreshold: number;
-    coreThreshold: number;
-  };
-  recencyDecayRate: number;
-  maxAccessCount: number;
-  consolidation: {
-    memoryThreshold: number;
-    timeThreshold: number;
-  };
-  cleanup: {
-    maxAge: number;
-    importanceThreshold: number;
-  };
-}
+
 
 interface MemoryStats {
   totalMemories: number;
@@ -54,11 +39,11 @@ export class MemoryManager {
 
   constructor(
     memoryService: MemoryService,
-    config: MemoryConfig = MEMORY_CONFIG as MemoryConfig
+    config: MemoryConfig = MEMORY_CONFIG
   ) {
     this.memoryService = memoryService;
-    this.evolution = new MemoryEvolution();
-    this.consolidator = new MemoryConsolidator();
+    this.evolution = new MemoryEvolution(config);
+    this.consolidator = new MemoryConsolidator(config);
     this.config = config;
     this.lastConsolidationTime = Date.now();
     this.stats = {
@@ -126,16 +111,20 @@ export class MemoryManager {
   private async evaluateTierTransition(memory: Memory): Promise<MemoryTierType> {
     const currentImportance = await this.calculateCurrentImportance(memory);
     
-    if (memory.tierType === 'background' && currentImportance > this.config.tiers.activeThreshold) {
+    if (memory.tierType === 'background' && 
+        currentImportance > this.config.getTierConfig('active').importanceThreshold) {
       return 'active';
     }
-    if (memory.tierType === 'active' && currentImportance > this.config.tiers.coreThreshold) {
+    if (memory.tierType === 'active' && 
+        currentImportance > this.config.getTierConfig('core').importanceThreshold) {
       return 'core';
     }
-    if (memory.tierType === 'core' && currentImportance < this.config.tiers.coreThreshold) {
+    if (memory.tierType === 'core' && 
+        currentImportance < this.config.getTierConfig('core').importanceThreshold) {
       return 'active';
     }
-    if (memory.tierType === 'active' && currentImportance < this.config.tiers.activeThreshold) {
+    if (memory.tierType === 'active' && 
+        currentImportance < this.config.getTierConfig('active').importanceThreshold) {
       return 'background';
     }
     
@@ -173,34 +162,37 @@ export class MemoryManager {
 
   private calculateRecencyScore(timestamp: number): number {
     const age = Date.now() - timestamp;
-    return Math.exp(-age / this.config.recencyDecayRate);
+    return Math.exp(-age / this.config.getEvolutionConfig().agingRate);
   }
-
+  
   private calculateAccessFrequencyScore(accessCount: number): number {
-    return Math.min(accessCount / this.config.maxAccessCount, 1);
+    return Math.min(accessCount / this.config.getConsolidationConfig().maxAccessCount, 1);
   }
 
   private async evaluateConsolidationNeed(): Promise<boolean> {
+    const consolidationConfig = this.config.getConsolidationConfig();
     return (
-      this.stats.totalMemories > this.config.consolidation.memoryThreshold ||
-      this.getTimeSinceLastConsolidation() > this.config.consolidation.timeThreshold
+      this.stats.totalMemories > consolidationConfig.memoryThreshold ||
+      this.getTimeSinceLastConsolidation() > consolidationConfig.timeThreshold
     );
   }
 
   private async cleanup(): Promise<void> {
-    await this.cleanupBackgroundMemories();
+    const evolutionConfig = this.config.getEvolutionConfig();
+    
+    await this.cleanupBackgroundMemories(evolutionConfig.maxAge);
     await this.cleanupStaleMemories();
     await this.optimizeStorage();
   }
 
-  private async cleanupBackgroundMemories(): Promise<void> {
+  private async cleanupBackgroundMemories(maxAge: number): Promise<void> {
     const oldMemories = await this.memoryService.getOldMemories(
       'background',
-      this.config.cleanup.maxAge
+      maxAge
     );
     
     for (const memory of oldMemories) {
-      if (memory.importance < this.config.cleanup.importanceThreshold) {
+      if (memory.importance < this.config.getEvolutionConfig().demotionThreshold) {
         await this.memoryService.delete(memory.id);
         this.stats.totalMemories--;
         this.stats.tierDistribution.background--;
@@ -209,11 +201,36 @@ export class MemoryManager {
   }
 
   private async cleanupStaleMemories(): Promise<void> {
-    // Implementation for stale memory cleanup
+    const evolutionConfig = this.config.getEvolutionConfig();
+    const memories = await this.memoryService.getMemories();
+    
+    for (const memory of memories) {
+      const age = Date.now() - memory.timestamp;
+      if (age > evolutionConfig.maxAge && 
+          memory.importance < evolutionConfig.demotionThreshold) {
+        await this.memoryService.delete(memory.id);
+        this.stats.totalMemories--;
+        this.stats.tierDistribution[memory.tierType]--;
+      }
+    }
   }
 
   private async optimizeStorage(): Promise<void> {
-    // Implementation for storage optimization
+    const generalConfig = this.config.getConfig().general;
+    
+    if (this.stats.totalMemories > generalConfig.maxTotalMemories) {
+      const memories = await this.memoryService.getMemories();
+      memories.sort((a, b) => a.importance - b.importance);
+      
+      const memoriesToRemove = memories.slice(0, 
+        this.stats.totalMemories - generalConfig.maxTotalMemories);
+      
+      for (const memory of memoriesToRemove) {
+        await this.memoryService.delete(memory.id);
+        this.stats.totalMemories--;
+        this.stats.tierDistribution[memory.tierType]--;
+      }
+    }
   }
 
   private async updateStats(): Promise<void> {
