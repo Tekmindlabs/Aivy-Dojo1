@@ -1,5 +1,3 @@
-// hybrid-agent.ts
-
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { createEmotionalAgent } from './emotional-agent';
 import { MemoryService, Memory } from '../memory/memory-service';
@@ -36,14 +34,15 @@ export class HybridAgent {
         throw new Error('Invalid message content');
       }
 
-      // 2. Generate embedding for the last message
-      const messageEmbedding = await getEmbedding(lastMessage.content);
+      // 2. Generate embedding for the last message and convert to number[]
+      const rawEmbedding = await getEmbedding(lastMessage.content);
+      const messageEmbedding = Array.from(rawEmbedding);
 
       // 3. Initialize Milvus search
       const client = await getMilvusClient();
       const searchWrapper = new MilvusSearchWrapper(client);
 
-      // 4. Perform vector search
+      // 4. Perform vector search with correct typing
       const searchResults = await searchWrapper.search({
         collection: 'memories',
         vector: messageEmbedding,
@@ -61,6 +60,9 @@ export class HybridAgent {
         importance: result.importance,
         timestamp: result.timestamp
       }));
+
+      // Update memory access metrics
+      await this.updateMemoryContext(relevantMemories, emotionalState);
 
       // 7. Generate ReAct steps
       const reactSteps: ReActStep[] = [
@@ -97,7 +99,6 @@ export class HybridAgent {
         success: true,
         timestamp: new Date().toISOString(),
         currentStep: 'completed',
-        userId: state.userId,
         messages: [...state.messages],
         context: {
           ...state.context,
@@ -125,7 +126,6 @@ export class HybridAgent {
         reactSteps: state.reactSteps || [],
         timestamp: new Date().toISOString(),
         currentStep: state.currentStep,
-        userId: state.userId,
         messages: state.messages,
         context: state.context,
         emotionalState: state.emotionalState
@@ -138,8 +138,7 @@ export class HybridAgent {
     emotionalState: EmotionalState
   ): Promise<void> {
     try {
-      await this.memoryService.updateMemoryAccessCounts(memories);
-      // Additional memory context updates can be added here
+      await this.memoryService.updateAccessMetrics(memories);
     } catch (error) {
       console.error('Error updating memory context:', error);
     }
