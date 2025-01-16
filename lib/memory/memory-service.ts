@@ -1,249 +1,190 @@
-// lib/memory/memory-service.ts
+// memory-service.ts
 
-import { Message } from '@/types/chat';
-import { getEmbedding } from '@/lib/knowledge/embeddings';
-import { insertVector, searchSimilarContent } from '@/lib/milvus/vectors';
-import { MemorySchema, DEFAULT_MEMORY_SCHEMAS, MEMORY_SCHEMAS } from './memory-schemas';
+import { MilvusClient } from '@zilliz/milvus2-sdk-node';
+import { MemoryTier, MemoryTierManager } from './tiers/memory-tiers';
+import { MemoryCompression } from './compression/memory-compression';
+import { MemoryCache } from './cache/memory-cache';
+import { MemoryConsolidator } from './consolidation/memory-consolidator';
+import { MEMORY_CONFIG } from '../../config/memory-config';
 
-export interface MemoryEntry {
+interface Memory {
   id: string;
-  schemaName: string;
-  content: Record<string, any>;
-  userId: string;
-  timestamp: Date;
-  embedding?: number[];
-  metadata?: Record<string, any>;
+  content: string;
+  embedding: number[];
+  timestamp: number;
+  tierType: 'core' | 'active' | 'background';
+  importance: number;
+  lastAccessed: number;
+  accessCount: number;
+  metadata: {
+    emotional_value?: number;
+    context_relevance?: number;
+    source?: string;
+  };
 }
 
 export class MemoryService {
-  private memoryCache: Map<string, MemoryEntry> = new Map();
-  private readonly CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+  private milvusClient: MilvusClient;
+  private tierManager: MemoryTierManager;
+  private compression: MemoryCompression;
+  private cache: MemoryCache;
+  private consolidator: MemoryConsolidator;
 
-  private async createEmbedding(content: string): Promise<number[]> {
-    try {
-      if (!content?.trim()) {
-        console.warn('Attempting to create embedding with empty content');
-        throw new Error('Cannot create embedding from empty content');
-      }
-      const embedding = await getEmbedding(content);
-      return Array.from(embedding);
-    } catch (error) {
-      console.error('Error creating embedding:', error);
-      throw error;
-    }
+  constructor(
+    milvusClient: MilvusClient,
+    config = MEMORY_CONFIG
+  ) {
+    this.milvusClient = milvusClient;
+    this.tierManager = new MemoryTierManager(config.tiers);
+    this.compression = new MemoryCompression(config.compression);
+    this.cache = new MemoryCache();
+    this.consolidator = new MemoryConsolidator();
   }
 
-  private validateMessages(messages: Message[]): void {
-    if (!Array.isArray(messages) || messages.length === 0) {
-      throw new Error('Messages array cannot be empty');
-    }
+  // Store memory with tier management
+  async store(memory: Partial<Memory>): Promise<string> {
+    const importance = await this.scoreMemoryImportance(memory);
+    const tierType = this.determineTierType(importance);
 
-    const lastMessage = messages[messages.length - 1];
-    if (!lastMessage?.content?.trim()) {
-      throw new Error('Last message content cannot be empty');
-    }
-  }
-
-  private validateUserId(userId: string): void {
-    if (!userId?.trim()) {
-      throw new Error('User ID is required');
-    }
-  }
-
-  // Fixed: Added validateSchemaName method
-  private validateSchemaName(schemaName: string): MemorySchema {
-    if (!schemaName?.trim()) {
-      throw new Error('Schema name is required');
-    }
-
-    const schema = DEFAULT_MEMORY_SCHEMAS.find(s => s.name === schemaName);
-    if (!schema) {
-      throw new Error(`Schema ${schemaName} not found in DEFAULT_MEMORY_SCHEMAS`);
-    }
-
-    return schema;
-  }
-
-  private getCacheKey(userId: string, schemaName: string): string {
-    return `${userId}:${schemaName}`;
-  }
-
-  private async processUserInformation(content: string): Promise<Record<string, any>> {
-    const nameMatch = content.match(/my name is (\w+)/i);
-    const interestsMatch = content.match(/i (?:like|love|enjoy) (.+?)(?:\.|\n|$)/i);
-
-    return {
-      user_name: nameMatch ? nameMatch[1] : undefined,
-      interests: interestsMatch ? [interestsMatch[1].trim()] : undefined,
-      last_interaction: new Date().toISOString()
+    const newMemory: Memory = {
+      id: crypto.randomUUID(),
+      content: memory.content!,
+      embedding: memory.embedding!,
+      timestamp: Date.now(),
+      tierType,
+      importance,
+      lastAccessed: Date.now(),
+      accessCount: 0,
+      metadata: memory.metadata || {}
     };
-  }
 
-  private mergeContent(existing: Record<string, any>, new_content: Record<string, any>): Record<string, any> {
-    const merged = { ...existing };
-
-    for (const [key, value] of Object.entries(new_content)) {
-      if (Array.isArray(existing[key]) && Array.isArray(value)) {
-        // Fixed: Changed Set spread to Array spread
-        merged[key] = Array.from(new Set([...existing[key], ...value]));
-      } else if (typeof existing[key] === 'object' && typeof value === 'object') {
-        merged[key] = this.mergeContent(existing[key], value);
-      } else {
-        merged[key] = value;
-      }
+    if (tierType === 'core') {
+      await this.cache.setCachedMemory(newMemory.id, newMemory);
     }
 
-    return merged;
+    const compressed = await this.compression.compressMemory(newMemory);
+    await this.milvusClient.insert({
+      collection_name: `memory_${tierType}`,
+      data: compressed
+    });
+
+    return newMemory.id;
   }
 
-  async addMemory(
-    messages: Message[],
-    userId: string,
-    schemaName: string,
-    metadata: Record<string, any> = {}
-  ): Promise<MemoryEntry> {
-    try {
-      this.validateMessages(messages);
-      this.validateUserId(userId);
-      const schema = this.validateSchemaName(schemaName);
-      const lastMessage = messages[messages.length - 1];
+  // Retrieve memory with tiered access
+  async retrieve(query: string, limit: number = 5): Promise<Memory[]> {
+    const results: Memory[] = [];
+    
+    // Cascading search through tiers
+    for (const tier of ['core', 'active', 'background']) {
+      const tierResults = await this.searchTier(tier, query, limit - results.length);
+      results.push(...tierResults);
       
-      let processedContent = {};
-      if (schemaName === MEMORY_SCHEMAS.USER) {
-        processedContent = await this.processUserInformation(lastMessage.content);
+      if (results.length >= limit) break;
+    }
+
+    // Update access metrics
+    await this.updateAccessMetrics(results);
+    
+    return results;
+  }
+
+  // Memory consolidation
+  async consolidateMemories(): Promise<void> {
+    const memories = await this.getAllMemories();
+    const consolidatedMemories = await this.consolidator.consolidateMemories(memories);
+    
+    for (const memory of consolidatedMemories) {
+      const newTier = this.determineTierType(memory.importance);
+      if (newTier !== memory.tierType) {
+        await this.transitionTier(memory, newTier);
       }
-
-      const embedding = await this.createEmbedding(lastMessage.content);
-      
-      const memoryEntry: MemoryEntry = {
-        id: crypto.randomUUID(),
-        schemaName,
-        content: {
-          ...processedContent,
-          ...metadata,
-          original_message: lastMessage.content,
-          messages: messages.map(m => ({
-            content: m.content,
-            role: m.role,
-            timestamp: new Date()
-          }))
-        },
-        userId,
-        timestamp: new Date(),
-        embedding,
-        metadata: {
-          last_updated: new Date().toISOString(),
-          context_type: schemaName,
-          ...metadata
-        }
-      };
-
-      if (schema.updateMode === 'patch') {
-        const existing = await this.getMemoryBySchema(userId, schemaName);
-        if (existing) {
-          memoryEntry.content = this.mergeContent(existing.content, memoryEntry.content);
-        }
-      }
-
-      // Fixed: Removed filters parameter and adjusted searchSimilarContent call
-      await insertVector({
-        userId,
-        contentType: 'memory',
-        contentId: memoryEntry.id,
-        embedding,
-        metadata: {
-          schemaName,
-          content: JSON.stringify(memoryEntry.content),
-          timestamp: memoryEntry.timestamp.toISOString()
-        }
-      });
-
-      this.memoryCache.set(this.getCacheKey(userId, schemaName), memoryEntry);
-      return memoryEntry;
-    } catch (error) {
-      console.error('Error adding memory:', error);
-      throw error;
     }
   }
 
-  async searchMemories(
+  // Importance scoring
+  private async scoreMemoryImportance(memory: Partial<Memory>): Promise<number> {
+    const factors = {
+      recency: this.calculateRecencyScore(memory.timestamp || Date.now()),
+      emotionalValue: memory.metadata?.emotional_value || 0,
+      contextRelevance: memory.metadata?.context_relevance || 0,
+      accessFrequency: this.calculateAccessFrequency(memory.accessCount || 0)
+    };
+
+    return (
+      factors.recency * 0.3 +
+      factors.emotionalValue * 0.3 +
+      factors.contextRelevance * 0.2 +
+      factors.accessFrequency * 0.2
+    );
+  }
+
+  // Tier transition
+  private async transitionTier(memory: Memory, newTier: MemoryTier['type']): Promise<void> {
+    await this.milvusClient.delete({
+      collection_name: `memory_${memory.tierType}`,
+      ids: [memory.id]
+    });
+
+    memory.tierType = newTier;
+    await this.store(memory);
+    
+    if (newTier === 'core') {
+      await this.cache.setCachedMemory(memory.id, memory);
+    } else {
+      await this.cache.invalidateCache(memory.id);
+    }
+  }
+
+  // Helper methods
+  private calculateRecencyScore(timestamp: number): number {
+    const age = Date.now() - timestamp;
+    return Math.exp(-age / (30 * 24 * 60 * 60 * 1000)); // 30-day decay
+  }
+
+  private calculateAccessFrequency(accessCount: number): number {
+    return Math.min(accessCount / 100, 1); // Normalize to 0-1
+  }
+
+  private async updateAccessMetrics(memories: Memory[]): Promise<void> {
+    for (const memory of memories) {
+      memory.lastAccessed = Date.now();
+      memory.accessCount++;
+      await this.store(memory);
+    }
+  }
+
+  private async searchTier(
+    tier: MemoryTier['type'],
     query: string,
-    userId: string,
-    schemaName?: string,
-    limit: number = 5
-  ): Promise<MemoryEntry[]> {
-    try {
-      const embedding = await this.createEmbedding(query);
-      
-      // Fixed: Removed filters parameter
-      const results = await searchSimilarContent({
-        userId,
-        embedding,
-        limit,
-        contentTypes: ['memory']
-      });
-
-      return results.map(result => {
-        const metadata = JSON.parse(result.metadata);
-        return {
-          id: result.id,
-          schemaName: metadata.schemaName,
-          content: JSON.parse(metadata.content),
-          userId: metadata.userId,
-          timestamp: new Date(metadata.timestamp),
-          embedding: embedding,
-          metadata: {
-            score: result.score,
-            ...metadata
-          }
-        };
-      });
-    } catch (error) {
-      console.error('Error searching memories:', error);
-      throw error;
+    limit: number
+  ): Promise<Memory[]> {
+    if (tier === 'core') {
+      const cached = await this.cache.getCachedMemory(query);
+      if (cached) return [cached];
     }
+
+    return await this.milvusClient.search({
+      collection_name: `memory_${tier}`,
+      vector: query,
+      limit
+    });
   }
 
-  async getMemoryBySchema(
-    userId: string,
-    schemaName: string
-  ): Promise<MemoryEntry | null> {
-    try {
-      const cacheKey = this.getCacheKey(userId, schemaName);
-      const cached = this.memoryCache.get(cacheKey);
-      
-      if (cached && (Date.now() - cached.timestamp.getTime()) < this.CACHE_TTL) {
-        return cached;
-      }
-
-      const memories = await this.searchMemories(schemaName, userId, schemaName, 1);
-      const memory = memories[0] || null;
-      
-      if (memory) {
-        this.memoryCache.set(cacheKey, memory);
-      }
-
-      return memory;
-    } catch (error) {
-      console.error('Error getting memory by schema:', error);
-      throw error;
-    }
+  private determineTierType(importance: number): MemoryTier['type'] {
+    if (importance >= 0.8) return 'core';
+    if (importance >= 0.4) return 'active';
+    return 'background';
   }
 
-  async clearMemories(userId: string, schemaName?: string): Promise<void> {
-    try {
-      // Fixed: Changed iteration approach
-      const cacheKeys = Array.from(this.memoryCache.keys());
-      for (const key of cacheKeys) {
-        if (key.startsWith(`${userId}:`)) {
-          if (!schemaName || key.endsWith(`:${schemaName}`)) {
-            this.memoryCache.delete(key);
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Error clearing memories:', error);
-      throw error;
+  private async getAllMemories(): Promise<Memory[]> {
+    const memories: Memory[] = [];
+    for (const tier of ['core', 'active', 'background']) {
+      const tierMemories = await this.milvusClient.query({
+        collection_name: `memory_${tier}`
+      });
+      memories.push(...tierMemories);
     }
+    return memories;
   }
 }
