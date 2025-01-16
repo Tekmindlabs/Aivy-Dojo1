@@ -1,92 +1,92 @@
 // memory-cache.ts
 
 import { MemoryTierType } from '../memory-schemas';
-import LRU from 'lru-cache';
+import { LRUCache } from 'lru-cache';
 
 interface CacheConfig {
-  maxSize: {
-    core: number;
-    active: number;
-    background: number;
-  };
-  ttl: {
-    core: number;
-    active: number;
-    background: number;
-  };
-  maxAge: {
-    core: number;
-    active: number;
-    background: number;
-  };
-}
-
-interface CacheMetrics {
-  hits: number;
-  misses: number;
-  evictions: number;
-  size: number;
-  hitRate: number;
-}
-
-interface CacheStats {
-  metrics: Record<MemoryTierType, CacheMetrics>;
-  lastCleanup: number;
-  totalOperations: number;
-}
-
-export class MemoryCache {
-  private caches: Record<MemoryTierType, LRU<string, any>>;
-  private stats: CacheStats;
-  private config: CacheConfig;
-
-  constructor(config?: Partial<CacheConfig>) {
-    this.config = {
-      maxSize: {
-        core: 1000,    // Larger cache for core memories
-        active: 500,   // Medium cache for active memories
-        background: 100 // Small cache for background memories
-      },
-      ttl: {
-        core: Infinity,                    // Core memories don't expire
-        active: 24 * 60 * 60 * 1000,      // 24 hours for active
-        background: 6 * 60 * 60 * 1000    // 6 hours for background
-      },
-      maxAge: {
-        core: Infinity,
-        active: 7 * 24 * 60 * 60 * 1000,  // 7 days for active
-        background: 2 * 24 * 60 * 60 * 1000 // 2 days for background
-      },
-      ...config
+    maxSize: {
+      core: number;
+      active: number;
+      background: number;
     };
-
-    this.initializeCaches();
-    this.initializeStats();
-  }
-
-  private initializeCaches(): void {
-    this.caches = {
-      core: new LRU({
-        max: this.config.maxSize.core,
-        ttl: this.config.ttl.core,
-        maxAge: this.config.maxAge.core,
-        updateAgeOnGet: true
-      }),
-      active: new LRU({
-        max: this.config.maxSize.active,
-        ttl: this.config.ttl.active,
-        maxAge: this.config.maxAge.active,
-        updateAgeOnGet: true
-      }),
-      background: new LRU({
-        max: this.config.maxSize.background,
-        ttl: this.config.ttl.background,
-        maxAge: this.config.maxAge.background,
-        updateAgeOnGet: true
-      })
+    ttl: {
+      core: number;
+      active: number;
+      background: number;
+    };
+    maxAge: {
+      core: number;
+      active: number;
+      background: number;
     };
   }
+  
+  interface CacheMetrics {
+    hits: number;
+    misses: number;
+    evictions: number;
+    size: number;
+    hitRate: number;
+  }
+  
+  interface CacheStats {
+    metrics: Record<MemoryTierType, CacheMetrics>;
+    lastCleanup: number;
+    totalOperations: number;
+  }
 
+  export class MemoryCache {
+    private caches!: Record<MemoryTierType, LRUCache<string, any>>; // Added ! to fix initialization error
+    private stats!: CacheStats; // Added ! to fix initialization error
+    private config: CacheConfig;
+  
+    constructor(config?: Partial<CacheConfig>) {
+      this.config = {
+        maxSize: {
+          core: 1000,
+          active: 500,
+          background: 100
+        },
+        ttl: {
+          core: Infinity,
+          active: 24 * 60 * 60 * 1000,
+          background: 6 * 60 * 60 * 1000
+        },
+        maxAge: {
+          core: Infinity,
+          active: 7 * 24 * 60 * 60 * 1000,
+          background: 2 * 24 * 60 * 60 * 1000
+        },
+        ...config
+      };
+  
+      this.initializeCaches();
+      this.initializeStats();
+    }
+  
+    private initializeCaches(): void {
+      this.caches = {
+        core: new LRUCache<string, any>({
+          max: this.config.maxSize.core,
+          ttl: this.config.ttl.core,
+          maxAge: this.config.maxAge.core,
+          updateAgeOnGet: true
+        }),
+        active: new LRUCache<string, any>({
+          max: this.config.maxSize.active,
+          ttl: this.config.ttl.active,
+          maxAge: this.config.maxAge.active,
+          updateAgeOnGet: true
+        }),
+        background: new LRUCache<string, any>({
+          max: this.config.maxSize.background,
+          ttl: this.config.ttl.background,
+          maxAge: this.config.maxAge.background,
+          updateAgeOnGet: true
+        })
+      };
+    }
+    
   private initializeStats(): void {
     this.stats = {
       metrics: {

@@ -1,8 +1,34 @@
-// vectors.ts
-
-import { MilvusClient, DataType, SearchParams } from '@zilliz/milvus2-sdk-node';
+import { MilvusClient, DataType } from '@zilliz/milvus2-sdk-node';
 import { MemoryTierType } from '../memory/memory-schemas';
-import { MEMORY_CONFIG } from '../../config/memory-config';
+
+// Define SearchParams interface since it's not exported from Milvus SDK
+interface SearchParams {
+  nprobe: number;
+  ef: number;
+  metric_type: string;
+}
+
+// Define memory config interface
+interface MemoryConfig {
+  dimensions: number;
+  indexParams: Record<MemoryTierType, any>;
+  searchParams: Record<MemoryTierType, SearchParams>;
+}
+
+// Default memory configuration
+const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
+  dimensions: 1536,
+  indexParams: {
+    core: { index_type: 'IVF_SQ8', metric_type: 'L2', params: { nlist: 1024 } },
+    active: { index_type: 'IVF_FLAT', metric_type: 'L2', params: { nlist: 512 } },
+    background: { index_type: 'IVF_FLAT', metric_type: 'L2', params: { nlist: 256 } }
+  },
+  searchParams: {
+    core: { nprobe: 256, ef: 512, metric_type: 'L2' },
+    active: { nprobe: 128, ef: 256, metric_type: 'L2' },
+    background: { nprobe: 64, ef: 128, metric_type: 'L2' }
+  }
+};
 
 interface VectorSearchParams {
   collection: string;
@@ -20,47 +46,35 @@ interface VectorInsertParams {
   tierType: MemoryTierType;
 }
 
+interface SearchResponse {
+  results: Array<{
+    id: string;
+    distance: number;
+    [key: string]: any;
+  }>;
+}
+
 export class VectorOperations {
   private client: MilvusClient;
-  private config: typeof MEMORY_CONFIG;
+  private config: MemoryConfig;
   private searchParamsByTier: Record<MemoryTierType, SearchParams>;
 
-  constructor(client: MilvusClient, config = MEMORY_CONFIG) {
+  constructor(client: MilvusClient, config: MemoryConfig = DEFAULT_MEMORY_CONFIG) {
     this.client = client;
     this.config = config;
-    this.searchParamsByTier = {
-      core: {
-        nprobe: 256,
-        ef: 512,
-        metric_type: 'L2'
-      },
-      active: {
-        nprobe: 128,
-        ef: 256,
-        metric_type: 'L2'
-      },
-      background: {
-        nprobe: 64,
-        ef: 128,
-        metric_type: 'L2'
-      }
-    };
+    this.searchParamsByTier = config.searchParams;
   }
 
-  // Tiered Search Implementation
   async searchVectors(params: VectorSearchParams): Promise<any[]> {
     const { collection, vector, limit = 10, offset = 0, filter, tierType } = params;
 
     if (tierType) {
-      // Single tier search
       return this.searchSingleTier(tierType, vector, limit, filter);
     } else {
-      // Cascading search through tiers
       return this.searchAcrossTiers(vector, limit);
     }
   }
 
-  // Batch Vector Processing
   async batchInsertVectors(params: VectorInsertParams): Promise<string[]> {
     const { collection, vectors, metadata, tierType } = params;
 
@@ -71,24 +85,21 @@ export class VectorOperations {
         vector,
         ...metadata[index],
         tier_type: tierType,
-        partition_tag: partitionTag,
         timestamp: Date.now()
       }));
 
       const response = await this.client.insert({
         collection_name: collection,
-        partition_name: partitionTag,
         data: insertData
       });
 
-      return response.ids as string[];
+      return Array.isArray(response.insertIds) ? response.insertIds : [];
     } catch (error) {
       console.error('Error in batch vector insertion:', error);
       throw error;
     }
   }
 
-  // Tier-specific Search Implementation
   private async searchSingleTier(
     tierType: MemoryTierType,
     vector: number[],
@@ -96,22 +107,19 @@ export class VectorOperations {
     filter?: string
   ): Promise<any[]> {
     const searchParams = this.searchParamsByTier[tierType];
-    const partitionTag = this.getPartitionTag(tierType);
 
     const response = await this.client.search({
       collection_name: `memory_${tierType}`,
-      partition_names: [partitionTag],
       vectors: [vector],
       search_params: searchParams,
       limit,
       filter,
       output_fields: ['*']
-    });
+    }) as SearchResponse;
 
-    return this.processSearchResults(response);
+    return this.processSearchResults(response.results);
   }
 
-  // Cascading Search Across Tiers
   private async searchAcrossTiers(
     vector: number[],
     totalLimit: number
@@ -130,107 +138,28 @@ export class VectorOperations {
     return results;
   }
 
-  // Partition Management
-  async createPartitions(): Promise<void> {
-    const tiers: MemoryTierType[] = ['core', 'active', 'background'];
-
-    for (const tier of tiers) {
-      const partitionTag = this.getPartitionTag(tier);
-      await this.client.createPartition({
-        collection_name: 'memories',
-        partition_name: partitionTag
-      });
-    }
-  }
-
-  // Vector Maintenance Operations
-  async optimizeVectors(tierType: MemoryTierType): Promise<void> {
-    const partitionTag = this.getPartitionTag(tierType);
-    
-    await this.client.compact({
-      collection_name: 'memories',
-      partition_names: [partitionTag]
-    });
-  }
-
-  // Batch Delete Operations
-  async batchDeleteVectors(ids: string[], tierType: MemoryTierType): Promise<void> {
-    const partitionTag = this.getPartitionTag(tierType);
-
-    await this.client.delete({
-      collection_name: 'memories',
-      partition_name: partitionTag,
-      ids
-    });
-  }
-
-  // Update Vector Operations
-  async updateVectorMetadata(
-    id: string,
-    metadata: Record<string, any>,
-    tierType: MemoryTierType
-  ): Promise<void> {
-    await this.client.update({
-      collection_name: 'memories',
-      partition_name: this.getPartitionTag(tierType),
-      ids: [id],
-      data: metadata
-    });
-  }
-
-  // Helper Methods
   private getPartitionTag(tierType: MemoryTierType): string {
     return `partition_${tierType}`;
   }
 
-  private processSearchResults(results: any): any[] {
+  private processSearchResults(results: Array<{ id: string; distance: number; [key: string]: any }>): any[] {
     return results.map(result => ({
       ...result,
-      score: 1 - result.distance // Normalize distance to similarity score
+      score: 1 - result.distance
     }));
   }
 
-  // Performance Optimization Methods
-  private async loadPartition(tierType: MemoryTierType): Promise<void> {
-    await this.client.loadPartitions({
-      collection_name: 'memories',
-      partition_names: [this.getPartitionTag(tierType)]
-    });
-  }
-
-  private async releasePartition(tierType: MemoryTierType): Promise<void> {
-    await this.client.releasePartitions({
-      collection_name: 'memories',
-      partition_names: [this.getPartitionTag(tierType)]
-    });
-  }
-
-  // Index Management
   async createIndex(tierType: MemoryTierType): Promise<void> {
-    const indexParams = {
-      core: { index_type: 'IVF_SQ8', metric_type: 'L2', params: { nlist: 1024 } },
-      active: { index_type: 'IVF_FLAT', metric_type: 'L2', params: { nlist: 512 } },
-      background: { index_type: 'IVF_FLAT', metric_type: 'L2', params: { nlist: 256 } }
-    };
-
     await this.client.createIndex({
       collection_name: 'memories',
       field_name: 'vector',
-      index_name: `index_${tierType}`,
-      index_params: indexParams[tierType]
+      extra_params: this.config.indexParams[tierType]
     });
   }
 
-  // Statistics and Monitoring
-  async getPartitionStats(tierType: MemoryTierType): Promise<any> {
-    const stats = await this.client.getCollectionStats({
-      collection_name: 'memories',
-      partition_name: this.getPartitionTag(tierType)
+  async getCollectionStatistics(collection: string): Promise<any> {
+    return await this.client.getCollectionStatistics({
+      collection_name: collection
     });
-
-    return {
-      tierType,
-      ...stats
-    };
   }
 }

@@ -31,6 +31,8 @@ declare module '@zilliz/milvus2-sdk-node' {
   export enum DataType {
     VARCHAR = 'VARCHAR',
     FLOAT_VECTOR = 'FLOAT_VECTOR',
-    JSON = 'JSON'
+    JSON = 'JSON',
+    INT64 = 'INT64',
+    FLOAT = 'FLOAT'
   }
 }
