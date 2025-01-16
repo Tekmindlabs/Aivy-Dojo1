@@ -4,6 +4,23 @@ import { MemoryEvolution } from '../memory/evolution/memory-evolution';
 import { MemoryConsolidator } from '../memory/consolidation/memory-consolidator';
 import { MEMORY_CONFIG } from '../../config/memory-config';
 
+interface MemoryConfig {
+  tiers: {
+    activeThreshold: number;
+    coreThreshold: number;
+  };
+  recencyDecayRate: number;
+  maxAccessCount: number;
+  consolidation: {
+    memoryThreshold: number;
+    timeThreshold: number;
+  };
+  cleanup: {
+    maxAge: number;
+    importanceThreshold: number;
+  };
+}
+
 interface MemoryStats {
   totalMemories: number;
   tierDistribution: Record<MemoryTierType, number>;
@@ -13,12 +30,17 @@ interface MemoryStats {
 
 interface Memory {
   id: string;
+  content: string;
+  embedding: number[];
   tierType: MemoryTierType;
   importance: number;
   timestamp: number;
+  lastAccessed: number;
   accessCount: number;
   metadata: {
-    contextRelevance: number;
+    emotional_value?: number;
+    context_relevance?: number;
+    source?: string;
   };
 }
 
@@ -27,12 +49,12 @@ export class MemoryManager {
   private evolution: MemoryEvolution;
   private consolidator: MemoryConsolidator;
   private stats: MemoryStats;
-  private config: typeof MEMORY_CONFIG;
+  private config: MemoryConfig;
   private lastConsolidationTime: number;
 
   constructor(
     memoryService: MemoryService,
-    config = MEMORY_CONFIG
+    config: MemoryConfig = MEMORY_CONFIG as MemoryConfig
   ) {
     this.memoryService = memoryService;
     this.evolution = new MemoryEvolution();
@@ -123,7 +145,7 @@ export class MemoryManager {
   private async transitionTier(memory: Memory, newTier: MemoryTierType): Promise<void> {
     try {
       await this.memoryService.transitionMemoryTier(memory, newTier);
-      this.stats.tierDistribution[memory.tierType as MemoryTierType]--;
+      this.stats.tierDistribution[memory.tierType]--;
       this.stats.tierDistribution[newTier]++;
       
       console.log(`Memory ${memory.id} transitioned from ${memory.tierType} to ${newTier}`);
@@ -133,18 +155,12 @@ export class MemoryManager {
     }
   }
 
-  private async cleanup(): Promise<void> {
-    await this.cleanupBackgroundMemories();
-    await this.cleanupStaleMemories();
-    await this.optimizeStorage();
-  }
-
   private async calculateCurrentImportance(memory: Memory): Promise<number> {
     const factors = {
       baseImportance: memory.importance,
       recency: this.calculateRecencyScore(memory.timestamp),
       accessFrequency: this.calculateAccessFrequencyScore(memory.accessCount),
-      relevance: memory.metadata.contextRelevance || 0
+      relevance: memory.metadata.context_relevance || 0
     };
 
     return (
@@ -169,6 +185,12 @@ export class MemoryManager {
       this.stats.totalMemories > this.config.consolidation.memoryThreshold ||
       this.getTimeSinceLastConsolidation() > this.config.consolidation.timeThreshold
     );
+  }
+
+  private async cleanup(): Promise<void> {
+    await this.cleanupBackgroundMemories();
+    await this.cleanupStaleMemories();
+    await this.optimizeStorage();
   }
 
   private async cleanupBackgroundMemories(): Promise<void> {
@@ -206,7 +228,7 @@ export class MemoryManager {
 
     let totalImportance = 0;
     for (const memory of memories) {
-      this.stats.tierDistribution[memory.tierType as MemoryTierType]++;
+      this.stats.tierDistribution[memory.tierType]++;
       totalImportance += memory.importance;
     }
 

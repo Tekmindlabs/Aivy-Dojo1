@@ -1,13 +1,19 @@
-// memory-tiers.ts
-
 import { MemoryTierType } from '../memory-schemas';
 
-// Tier interfaces
+interface Memory {
+  id: string;
+  tierType: MemoryTierType;
+  importance: number;
+  timestamp: number;
+  lastAccessed: number;
+  accessCount: number;
+}
+
 export interface MemoryTier {
   type: MemoryTierType;
   minImportance: number;
   maxCapacity: number;
-  retentionPeriod: number; // in milliseconds
+  retentionPeriod: number;
   promotionThreshold: number;
   demotionThreshold: number;
 }
@@ -33,105 +39,103 @@ export interface TierStats {
   lastCleanupTime: number;
 }
 
-export class MemoryTierManager {
-  private tiers: Map<MemoryTierType, MemoryTier>;
-  private stats: Map<MemoryTierType, TierStats>;
-  private transitionRules: Record<MemoryTierType, TierTransitionRules>;
+interface TierConfig {
+  tiers: {
+    core: { maxCapacity: number };
+    active: { maxCapacity: number };
+    background: { maxCapacity: number };
+  };
+}
 
-  constructor(config: any) {
+export class MemoryTierManager {
+  private tiers: Map<MemoryTierType, MemoryTier> = new Map();
+  private stats: Map<MemoryTierType, TierStats> = new Map();
+  private transitionRules: Record<MemoryTierType, TierTransitionRules> = {
+    core: {
+      promotionRules: {
+        minImportance: 0.8,
+        minAccessCount: 50,
+        minAccessFrequency: 0.7
+      },
+      demotionRules: {
+        maxInactivityPeriod: 7 * 24 * 60 * 60 * 1000,
+        importanceDecayRate: 0.1,
+        maxCapacityThreshold: 0.95
+      }
+    },
+    active: {
+      promotionRules: {
+        minImportance: 0.4,
+        minAccessCount: 20,
+        minAccessFrequency: 0.4
+      },
+      demotionRules: {
+        maxInactivityPeriod: 14 * 24 * 60 * 60 * 1000,
+        importanceDecayRate: 0.2,
+        maxCapacityThreshold: 0.9
+      }
+    },
+    background: {
+      promotionRules: {
+        minImportance: 0.2,
+        minAccessCount: 5,
+        minAccessFrequency: 0.2
+      },
+      demotionRules: {
+        maxInactivityPeriod: 30 * 24 * 60 * 60 * 1000,
+        importanceDecayRate: 0.3,
+        maxCapacityThreshold: 0.8
+      }
+    }
+  };
+
+  constructor(config: TierConfig) {
     this.initializeTiers(config);
     this.initializeStats();
-    this.initializeTransitionRules(config);
   }
 
-  // Tier Management Methods
-  private initializeTiers(config: any): void {
-    this.tiers = new Map([
-      ['core', {
-        type: 'core',
-        minImportance: 0.8,
-        maxCapacity: config.tiers.core.maxCapacity || 1000,
-        retentionPeriod: Infinity,
-        promotionThreshold: 0.9,
-        demotionThreshold: 0.7
-      }],
-      ['active', {
-        type: 'active',
-        minImportance: 0.4,
-        maxCapacity: config.tiers.active.maxCapacity || 5000,
-        retentionPeriod: 30 * 24 * 60 * 60 * 1000, // 30 days
-        promotionThreshold: 0.8,
-        demotionThreshold: 0.3
-      }],
-      ['background', {
-        type: 'background',
-        minImportance: 0,
-        maxCapacity: config.tiers.background.maxCapacity || 10000,
-        retentionPeriod: 90 * 24 * 60 * 60 * 1000, // 90 days
-        promotionThreshold: 0.4,
-        demotionThreshold: 0
-      }]
-    ]);
+  private initializeTiers(config: TierConfig): void {
+    this.tiers.set('core', {
+      type: 'core',
+      minImportance: 0.8,
+      maxCapacity: config.tiers.core.maxCapacity || 1000,
+      retentionPeriod: Infinity,
+      promotionThreshold: 0.9,
+      demotionThreshold: 0.7
+    });
+
+    this.tiers.set('active', {
+      type: 'active',
+      minImportance: 0.4,
+      maxCapacity: config.tiers.active.maxCapacity || 5000,
+      retentionPeriod: 30 * 24 * 60 * 60 * 1000,
+      promotionThreshold: 0.8,
+      demotionThreshold: 0.3
+    });
+
+    this.tiers.set('background', {
+      type: 'background',
+      minImportance: 0,
+      maxCapacity: config.tiers.background.maxCapacity || 10000,
+      retentionPeriod: 90 * 24 * 60 * 60 * 1000,
+      promotionThreshold: 0.4,
+      demotionThreshold: 0
+    });
   }
 
   private initializeStats(): void {
-    this.stats = new Map(
-      Array.from(this.tiers.keys()).map(tierType => [
-        tierType,
-        {
-          currentSize: 0,
-          averageImportance: 0,
-          promotionCount: 0,
-          demotionCount: 0,
-          lastCleanupTime: Date.now()
-        }
-      ])
-    );
+    for (const tierType of this.tiers.keys()) {
+      this.stats.set(tierType, {
+        currentSize: 0,
+        averageImportance: 0,
+        promotionCount: 0,
+        demotionCount: 0,
+        lastCleanupTime: Date.now()
+      });
+    }
   }
 
-  private initializeTransitionRules(config: any): void {
-    this.transitionRules = {
-      core: {
-        promotionRules: {
-          minImportance: 0.8,
-          minAccessCount: 50,
-          minAccessFrequency: 0.7
-        },
-        demotionRules: {
-          maxInactivityPeriod: 7 * 24 * 60 * 60 * 1000, // 7 days
-          importanceDecayRate: 0.1,
-          maxCapacityThreshold: 0.95
-        }
-      },
-      active: {
-        promotionRules: {
-          minImportance: 0.4,
-          minAccessCount: 20,
-          minAccessFrequency: 0.4
-        },
-        demotionRules: {
-          maxInactivityPeriod: 14 * 24 * 60 * 60 * 1000, // 14 days
-          importanceDecayRate: 0.2,
-          maxCapacityThreshold: 0.9
-        }
-      },
-      background: {
-        promotionRules: {
-          minImportance: 0.2,
-          minAccessCount: 5,
-          minAccessFrequency: 0.2
-        },
-        demotionRules: {
-          maxInactivityPeriod: 30 * 24 * 60 * 60 * 1000, // 30 days
-          importanceDecayRate: 0.3,
-          maxCapacityThreshold: 0.8
-        }
-      }
-    };
-  }
-
-  // Tier Operations
-  public async evaluatePromotion(memory: any): Promise<MemoryTierType | null> {
+  public async evaluatePromotion(memory: Memory): Promise<MemoryTierType | null> {
     const currentTier = memory.tierType;
     const rules = this.transitionRules[currentTier].promotionRules;
     
@@ -150,7 +154,7 @@ export class MemoryTierManager {
     return null;
   }
 
-  public async evaluateDemotion(memory: any): Promise<MemoryTierType | null> {
+  public async evaluateDemotion(memory: Memory): Promise<MemoryTierType | null> {
     const currentTier = memory.tierType;
     const rules = this.transitionRules[currentTier].demotionRules;
     
@@ -185,10 +189,9 @@ export class MemoryTierManager {
     return memoriesToRemove;
   }
 
-  // Helper Methods
-  private calculateAccessFrequency(memory: any): number {
+  private calculateAccessFrequency(memory: Memory): number {
     const timespan = Date.now() - memory.timestamp;
-    return memory.accessCount / (timespan / (24 * 60 * 60 * 1000)); // Daily frequency
+    return memory.accessCount / (timespan / (24 * 60 * 60 * 1000));
   }
 
   public getTierConfig(tierType: MemoryTierType): MemoryTier {
@@ -205,7 +208,7 @@ export class MemoryTierManager {
   }
 
   public async validateTierTransition(
-    memory: any,
+    memory: Memory,
     targetTier: MemoryTierType
   ): Promise<boolean> {
     const targetTierConfig = this.tiers.get(targetTier)!;
