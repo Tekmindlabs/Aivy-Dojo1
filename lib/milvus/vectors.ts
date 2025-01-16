@@ -80,7 +80,7 @@ export class VectorOperations {
     const searchParams = {
       collection_name: collection,
       vectors: [vector],
-      nq: 1, 
+      nq: nq, // Use the parameter value instead of hardcoding
       search_params: tierType ? 
         this.searchParamsByTier[tierType] : 
         this.searchParamsByTier.core,
@@ -127,12 +127,13 @@ export class VectorOperations {
     tierType: MemoryTierType,
     vector: number[],
     limit: number,
-    filter?: string
+    filter?: string,
+    nq: number = 1  // Add default parameter
   ): Promise<any[]> {
     const searchParams = {
       collection_name: `memory_${tierType}`,
       vectors: [vector],
-      nq: 1, // Ensure nq is included
+      nq: nq,  // Use the parameter
       search_params: this.searchParamsByTier[tierType],
       limit,
       filter,
