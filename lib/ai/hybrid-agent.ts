@@ -56,9 +56,18 @@ export class HybridAgent {
 
       // 6. Build context from search results
       const relevantMemories = searchResults.map((result: any) => ({
+        id: result.id || crypto.randomUUID(), // Required
         content: result.content,
+        embedding: result.embedding || new Array(384).fill(0), // Required, using 384 dimensions as shown in mock
+        timestamp: result.timestamp,
+        tierType: result.tierType || 'active', // Required
         importance: result.importance,
-        timestamp: result.timestamp
+        lastAccessed: result.lastAccessed || Date.now(), // Required
+        accessCount: result.accessCount || 0, // Required
+        metadata: {
+          emotional_value: result.metadata?.emotional_value,
+          context_relevance: result.metadata?.context_relevance
+        }
       }));
 
       // Update memory access metrics
@@ -138,7 +147,12 @@ export class HybridAgent {
     emotionalState: EmotionalState
   ): Promise<void> {
     try {
-      await this.memoryService.updateAccessMetrics(memories);
+      // The retrieve method will update access metrics internally
+      await Promise.all(
+        memories.map(memory => 
+          this.memoryService.retrieve(memory.content)
+        )
+      );
     } catch (error) {
       console.error('Error updating memory context:', error);
     }
