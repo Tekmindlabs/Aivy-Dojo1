@@ -268,18 +268,31 @@ export class MemoryService {
     tier: MemoryTierType,
     query: string,
     limit: number
-  ): Promise<Memory[]> {
+): Promise<Memory[]> {
     if (tier === 'core') {
       const cached = await this.cache.getCachedMemory(query);
       if (cached) return [cached];
     }
 
+    // Simplified search parameters without the undefined getTierSearchParams
     return await this.milvusClient.search({
       collection_name: `memory_${tier}`,
       vectors: [query],
-      limit
+      nq: 1, // Add this to fix the original error
+      limit,
+      output_fields: ['*']
     });
-  }
+}
+
+private processSearchResults(response: any): Memory[] {
+    if (!response || !response.results) {
+      return [];
+    }
+    return response.results.map((result: any) => ({
+      ...result,
+      score: 1 - (result.distance || 0)
+    }));
+}
 
   private determineTierType(importance: number): MemoryTierType {
     if (importance >= 0.8) return 'core';
