@@ -6,6 +6,7 @@ import { MemoryTierType } from '../lib/memory/memory-schemas';
 // Configuration schema definitions
 const TierConfigSchema = z.object({
   maxSize: z.number().positive(),
+  maxCapacity: z.number().positive(), // Add this
   ttl: z.number().nonnegative(),
   importanceThreshold: z.number().min(0).max(1),
   compressionRatio: z.number().positive().optional(),
@@ -59,24 +60,27 @@ export const DEFAULT_CONFIG = {
   tiers: {
     core: {
       maxSize: 1000,
+      maxCapacity: 1000, // Add this
       ttl: Infinity,
       importanceThreshold: 0.8,
       compressionRatio: 1.0,
-      backupFrequency: 24 * 60 * 60 * 1000 // 24 hours
+      backupFrequency: 24 * 60 * 60 * 1000
     },
     active: {
       maxSize: 5000,
-      ttl: 30 * 24 * 60 * 60 * 1000, // 30 days
+      maxCapacity: 5000, // Add this
+      ttl: 30 * 24 * 60 * 60 * 1000,
       importanceThreshold: 0.4,
       compressionRatio: 0.8,
-      backupFrequency: 48 * 60 * 60 * 1000 // 48 hours
+      backupFrequency: 48 * 60 * 60 * 1000
     },
     background: {
       maxSize: 10000,
-      ttl: 90 * 24 * 60 * 60 * 1000, // 90 days
+      maxCapacity: 10000, // Add this
+      ttl: 90 * 24 * 60 * 60 * 1000,
       importanceThreshold: 0.0,
       compressionRatio: 0.6,
-      backupFrequency: 72 * 60 * 60 * 1000 // 72 hours
+      backupFrequency: 72 * 60 * 60 * 1000
     }
   },
   consolidation: {

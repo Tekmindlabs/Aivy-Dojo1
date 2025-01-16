@@ -18,6 +18,22 @@ export interface MemoryTier {
   demotionThreshold: number;
 }
 
+export interface TierSettings {
+  maxCapacity: number;
+  importanceThreshold?: number;
+  retentionPeriod?: number;
+  promotionThreshold?: number;
+  demotionThreshold?: number;
+}
+
+export interface TierConfig {
+  tiers: {
+    core: TierSettings;
+    active: TierSettings;
+    background: TierSettings;
+  };
+}
+
 export interface TierTransitionRules {
   promotionRules: {
     minImportance: number;
@@ -39,87 +55,63 @@ export interface TierStats {
   lastCleanupTime: number;
 }
 
-interface TierConfig {
-  tiers: {
-    core: { maxCapacity: number };
-    active: { maxCapacity: number };
-    background: { maxCapacity: number };
-  };
-}
-
 export class MemoryTierManager {
   private tiers: Map<MemoryTierType, MemoryTier> = new Map();
   private stats: Map<MemoryTierType, TierStats> = new Map();
-  private transitionRules: Record<MemoryTierType, TierTransitionRules> = {
-    core: {
-      promotionRules: {
-        minImportance: 0.8,
-        minAccessCount: 50,
-        minAccessFrequency: 0.7
-      },
-      demotionRules: {
-        maxInactivityPeriod: 7 * 24 * 60 * 60 * 1000,
-        importanceDecayRate: 0.1,
-        maxCapacityThreshold: 0.95
-      }
-    },
-    active: {
-      promotionRules: {
-        minImportance: 0.4,
-        minAccessCount: 20,
-        minAccessFrequency: 0.4
-      },
-      demotionRules: {
-        maxInactivityPeriod: 14 * 24 * 60 * 60 * 1000,
-        importanceDecayRate: 0.2,
-        maxCapacityThreshold: 0.9
-      }
-    },
-    background: {
-      promotionRules: {
-        minImportance: 0.2,
-        minAccessCount: 5,
-        minAccessFrequency: 0.2
-      },
-      demotionRules: {
-        maxInactivityPeriod: 30 * 24 * 60 * 60 * 1000,
-        importanceDecayRate: 0.3,
-        maxCapacityThreshold: 0.8
-      }
-    }
-  };
+  private transitionRules!: Record<MemoryTierType, TierTransitionRules>;
 
   constructor(config: TierConfig) {
+    if (!config?.tiers) {
+      throw new Error('Memory configuration must include tiers property');
+    }
+
+    const requiredTiers = ['core', 'active', 'background'] as const;
+    for (const tier of requiredTiers) {
+      if (!config.tiers[tier]?.maxCapacity) {
+        throw new Error(`Invalid tier configuration: missing ${tier}.maxCapacity`);
+      }
+      if (config.tiers[tier].maxCapacity <= 0) {
+        throw new Error(`Invalid tier configuration: ${tier}.maxCapacity must be positive`);
+      }
+    }
+
     this.initializeTiers(config);
     this.initializeStats();
+    this.initializeTransitionRules();
   }
 
   private initializeTiers(config: TierConfig): void {
+    const defaultRetentionPeriods = {
+      core: Infinity,
+      active: 30 * 24 * 60 * 60 * 1000,
+      background: 90 * 24 * 60 * 60 * 1000
+    };
+
     this.tiers.set('core', {
       type: 'core',
       minImportance: 0.8,
-      maxCapacity: config.tiers.core.maxCapacity || 1000,
-      retentionPeriod: Infinity,
-      promotionThreshold: 0.9,
-      demotionThreshold: 0.7
+      maxCapacity: config.tiers.core.maxCapacity,
+      retentionPeriod: config.tiers.core.retentionPeriod ?? defaultRetentionPeriods.core,
+      promotionThreshold: config.tiers.core.promotionThreshold ?? 0.9,
+      demotionThreshold: config.tiers.core.demotionThreshold ?? 0.7
     });
 
     this.tiers.set('active', {
       type: 'active',
       minImportance: 0.4,
-      maxCapacity: config.tiers.active.maxCapacity || 5000,
-      retentionPeriod: 30 * 24 * 60 * 60 * 1000,
-      promotionThreshold: 0.8,
-      demotionThreshold: 0.3
+      maxCapacity: config.tiers.active.maxCapacity,
+      retentionPeriod: config.tiers.active.retentionPeriod ?? defaultRetentionPeriods.active,
+      promotionThreshold: config.tiers.active.promotionThreshold ?? 0.8,
+      demotionThreshold: config.tiers.active.demotionThreshold ?? 0.3
     });
 
     this.tiers.set('background', {
       type: 'background',
       minImportance: 0,
-      maxCapacity: config.tiers.background.maxCapacity || 10000,
-      retentionPeriod: 90 * 24 * 60 * 60 * 1000,
-      promotionThreshold: 0.4,
-      demotionThreshold: 0
+      maxCapacity: config.tiers.background.maxCapacity,
+      retentionPeriod: config.tiers.background.retentionPeriod ?? defaultRetentionPeriods.background,
+      promotionThreshold: config.tiers.background.promotionThreshold ?? 0.4,
+      demotionThreshold: config.tiers.background.demotionThreshold ?? 0
     });
   }
 
@@ -133,6 +125,47 @@ export class MemoryTierManager {
         lastCleanupTime: Date.now()
       });
     }
+  }
+
+  private initializeTransitionRules(): void {
+    this.transitionRules = {
+      core: {
+        promotionRules: {
+          minImportance: 0.9,
+          minAccessCount: 10,
+          minAccessFrequency: 0.5
+        },
+        demotionRules: {
+          maxInactivityPeriod: 7 * 24 * 60 * 60 * 1000,
+          importanceDecayRate: 0.1,
+          maxCapacityThreshold: 0.9
+        }
+      },
+      active: {
+        promotionRules: {
+          minImportance: 0.7,
+          minAccessCount: 5,
+          minAccessFrequency: 0.3
+        },
+        demotionRules: {
+          maxInactivityPeriod: 14 * 24 * 60 * 60 * 1000,
+          importanceDecayRate: 0.2,
+          maxCapacityThreshold: 0.8
+        }
+      },
+      background: {
+        promotionRules: {
+          minImportance: 0.5,
+          minAccessCount: 3,
+          minAccessFrequency: 0.1
+        },
+        demotionRules: {
+          maxInactivityPeriod: 30 * 24 * 60 * 60 * 1000,
+          importanceDecayRate: 0.3,
+          maxCapacityThreshold: 0.7
+        }
+      }
+    };
   }
 
   public async evaluatePromotion(memory: Memory): Promise<MemoryTierType | null> {

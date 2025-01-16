@@ -32,14 +32,27 @@ export class MemoryService {
 
   constructor(
     milvusClient: MilvusClient,
-    config = MEMORY_CONFIG
+    config = MEMORY_CONFIG.getConfig()
   ) {
     this.milvusClient = milvusClient;
-    this.tierManager = new MemoryTierManager(config.tiers);
+    
+    if (!config?.tiers) {
+      throw new Error('Memory configuration must include tiers property');
+    }
+    
+    // Validate tier configuration
+    if (!config.tiers.core?.maxCapacity ||
+        !config.tiers.active?.maxCapacity ||
+        !config.tiers.background?.maxCapacity) {
+      throw new Error('Invalid tier configuration: missing maxCapacity');
+    }
+
+    this.tierManager = new MemoryTierManager(config);
     this.compression = new MemoryCompression(config.compression);
     this.cache = new MemoryCache();
     this.consolidator = new MemoryConsolidator();
   }
+
 
   async getMemoriesByTier(tier: MemoryTierType): Promise<Memory[]> {
     return await this.milvusClient.query({
