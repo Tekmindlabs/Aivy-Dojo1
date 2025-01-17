@@ -10,6 +10,30 @@ interface BaseMemorySchema {
   indexes?: Record<string, any>;
 }
 
+export interface MemoryMetadata {
+  emotional_value: number;
+  context_relevance: number;
+  emotional_state?: EmotionalState;
+  source?: string;
+  tags?: string[];
+  category?: string;
+  confidence?: number;
+  relationships?: {
+    connectedMemories?: string[];
+    strength?: number;
+  };
+  userContext?: {
+    userId?: string;
+    sessionId?: string;
+    interactionType?: string;
+  };
+  processingMetadata?: {
+    compressionRatio?: number;
+    processingTimestamp?: number;
+    version?: string;
+  };
+}
+
 // Memory field definitions
 export const MEMORY_FIELDS = {
   ID: 'id',
@@ -88,7 +112,7 @@ const metadataFields = {
 };
 
 // Export types for TypeScript support
-export type MemoryTierType = 'core' | 'active' | 'background';
+export type MemoryTierType = keyof typeof MemoryTier;
 export type MemoryField = keyof typeof MEMORY_FIELDS;
 
 // Schema definitions for each memory tier
@@ -162,23 +186,24 @@ export const BACKGROUND_MEMORY: BaseMemorySchema = {
 };
 
 // Collection creation parameters with proper typing
-export const COLLECTION_PARAMS: Record<MemoryTierType, {
+export const COLLECTION_PARAMS: Record<MemoryTier, {
   description: string;
   schema: BaseMemorySchema;
 }> = {
-  core: {
+  [MemoryTier.CORE]: {
     description: 'Core memory collection',
     schema: CORE_MEMORY
   },
-  active: {
+  [MemoryTier.ACTIVE]: {
     description: 'Active memory collection',
     schema: ACTIVE_MEMORY
   },
-  background: {
+  [MemoryTier.BACKGROUND]: {
     description: 'Background memory collection',
     schema: BACKGROUND_MEMORY
   }
 };
+
 
 // Utility functions for schema operations with proper typing
 export const SchemaUtils = {
@@ -199,4 +224,22 @@ export const SchemaUtils = {
 export interface MemorySchema {
   fields: Record<string, any>;
   indexes: Record<string, any>;
+}
+
+export interface Memory {
+  id: string;
+  content: string;
+  embedding: number[];
+  timestamp: number;
+  tierType: MemoryTierType;
+  importance: number;
+  lastAccessed: number;
+  accessCount: number;
+  metadata: MemoryMetadata;
+}
+
+export enum MemoryTier {
+  CORE = 'core',
+  ACTIVE = 'active',
+  BACKGROUND = 'background'
 }

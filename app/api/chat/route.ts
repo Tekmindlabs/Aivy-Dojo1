@@ -179,27 +179,28 @@ export async function POST(req: NextRequest) {
           }]
         }]
       }),
-      memoryService.store({
+      await memoryService.store({
         content: lastMessage.content,
         userId: user.id,
-        tierType: 'active',
-        metadata: {
-          emotional_value: response.emotionalState?.confidence === 'high' ? 0.9 : 0.7,
-          context_relevance: calculateContextRelevance(memoryContext),
-          confidence: calculateImportance(response),
-          tags: user.interests,
-          category: 'chat',
-          userContext: {
-            userId: user.id,
-            learningStyle: user.learningStyle,
-            difficultyPreference: user.difficultyPreference
+        tierType: MemoryTier.ACTIVE,
+        metadata: MemoryTransformer.transformChatToMemoryMetadata(
+          {
+            emotionalState: response.emotionalState,
+            memoryMetrics: {
+              contextRelevance: calculateContextRelevance(memoryContext),
+              importanceScore: calculateImportance(response),
+              timestamp: new Date().toISOString(),
+              relatedMemories: memoryContext.map(m => m.id)
+            },
+            personalization: {
+              learningStyle: user.learningStyle,
+              difficulty: user.difficultyPreference,
+              interests: user.interests || []
+            }
           },
-          processingMetadata: {
-            processingTimestamp: Date.now(),
-            version: '1.0'
-          }
-        }
-      })
+          user.id
+        )
+      });
     ]); // Close Promise.all here
     const finalResponse = personalizedResponse.response.text()
       .replace(/^\d+:/, '')

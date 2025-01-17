@@ -39,6 +39,20 @@ export interface AgentState {
 }
 
 export interface HybridState extends AgentState {
+  userId: string;
+  messages: Message[];
+  currentStep: string;
+  emotionalState: EmotionalState;
+  context: {
+    role: AgentRole;
+    analysis: {
+      emotional?: string;
+      memories?: Memory[];
+      learningStyle?: string | null;
+      difficulty?: string | null;
+    };
+    recommendations?: string;
+  };
   reactSteps: ReActStep[];
 }
 // Response interface extending the base state

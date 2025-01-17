@@ -204,17 +204,46 @@ export class MemoryService {
   }
 
   async consolidateMemories(): Promise<void> {
-    const memories = await this.getAllMemories();
-    const consolidatedMemories = await this.consolidator.consolidateMemories(memories);
-    
-    for (const memory of consolidatedMemories) {
-      const newTier = this.determineTierType(memory.importance);
-      if (newTier !== memory.tierType) {
-        await this.transitionTier(memory, newTier);
+    try {
+      // Get all memories
+      const memories = await this.getAllMemories();
+      
+      // Use consolidator to process memories
+      const consolidatedMemories = await this.consolidator.consolidateMemories(memories);
+      
+      // Process each consolidated memory
+      for (const memory of consolidatedMemories) {
+        // Determine new tier based on updated importance
+        const newTier = this.determineTierType(memory.importance);
+        
+        // If tier changed, handle transition
+        if (newTier !== memory.tierType) {
+          await this.transitionTier(memory, newTier);
+        }
+        
+        // Update memory with consolidated data
+        await this.update(memory);
       }
+  
+      // Update cache for core memories
+      await this.updateCoreMemoryCache(consolidatedMemories);
+  
+    } catch (error) {
+      throw new MemoryServiceError(
+        'Memory consolidation failed',
+        MemoryErrorCodes.CONSOLIDATION_FAILED,
+        { originalError: error }
+      );
     }
   }
 
+  private async updateCoreMemoryCache(memories: Memory[]): Promise<void> {
+    const coreMemories = memories.filter(m => m.tierType === MemoryTier.CORE);
+    await Promise.all(
+      coreMemories.map(memory => this.cache.setCachedMemory(memory.id, memory))
+    );
+  }
+  
   private async scoreMemoryImportance(memory: Partial<Memory>): Promise<number> {
     const factors = {
       recency: this.calculateRecencyScore(memory.timestamp || Date.now()),
