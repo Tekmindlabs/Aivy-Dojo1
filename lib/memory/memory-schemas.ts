@@ -1,5 +1,18 @@
 import { DataType } from '@zilliz/milvus2-sdk-node';
 
+export enum EmotionalState {
+  POSITIVE = 'positive',
+  NEGATIVE = 'negative',
+  NEUTRAL = 'neutral'
+}
+
+export enum MemoryTier {
+  CORE = 'core',
+  ACTIVE = 'active',
+  BACKGROUND = 'background'
+}
+
+
 // Base schema interface for common fields across all memory types
 interface BaseMemorySchema {
   id: string;
@@ -217,7 +230,7 @@ export const SchemaUtils = {
   },
 
   isValidTierType: (tierType: string): tierType is MemoryTierType => {
-    return ['core', 'active', 'background'].includes(tierType);
+    return Object.values(MemoryTier).includes(tierType as MemoryTier);
   }
 };
 
@@ -236,10 +249,4 @@ export interface Memory {
   lastAccessed: number;
   accessCount: number;
   metadata: MemoryMetadata;
-}
-
-export enum MemoryTier {
-  CORE = 'core',
-  ACTIVE = 'active',
-  BACKGROUND = 'background'
 }

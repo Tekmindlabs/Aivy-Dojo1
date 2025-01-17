@@ -11,6 +11,9 @@ import { MemoryService } from '@/lib/memory/memory-service';
 import { EmbeddingModel } from '@/lib/knowledge/embeddings';
 import { ChatHandler } from '@/lib/chat/chat-handler';
 import { getMilvusClient } from '@/lib/milvus/client';
+import { MemoryTier } from 'lib/memory/memory-schemas';
+import { MemoryTransformer } from 'lib/memory/transformers/memory-transformer';
+import { Memory } from 'lib/memory/memory-schemas';
 
 // Helper functions for memory metrics
 const calculateContextRelevance = (memories: any[]): number => {
@@ -181,8 +184,8 @@ export async function POST(req: NextRequest) {
       }),
       await memoryService.store({
         content: lastMessage.content,
-        userId: user.id,
-        tierType: MemoryTier.ACTIVE,
+        user_id: user.id,
+        tier_type: MemoryTier.ACTIVE,
         metadata: MemoryTransformer.transformChatToMemoryMetadata(
           {
             emotionalState: response.emotionalState,
@@ -199,8 +202,8 @@ export async function POST(req: NextRequest) {
             }
           },
           user.id
-        )
-      });
+        ) as Partial<Memory>
+      }),
     ]); // Close Promise.all here
     const finalResponse = personalizedResponse.response.text()
       .replace(/^\d+:/, '')
