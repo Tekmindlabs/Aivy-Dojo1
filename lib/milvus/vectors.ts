@@ -1,5 +1,6 @@
 import { MilvusClient, DataType } from '@zilliz/milvus2-sdk-node';
 import { MemoryTierType } from '../memory/memory-schemas';
+import { MilvusOperationError } from './error-handler';
 
 // Define SearchParams interface since it's not exported from Milvus SDK
 interface SearchParams {
@@ -59,11 +60,16 @@ export class VectorOperations {
   private client: MilvusClient;
   private config: MemoryConfig;
   private searchParamsByTier: Record<MemoryTierType, SearchParams>;
+  private connectionPool: any;
 
   constructor(client: MilvusClient, config: MemoryConfig = DEFAULT_MEMORY_CONFIG) {
     this.client = client;
     this.config = config;
     this.searchParamsByTier = config.searchParams;
+  }
+
+  private async getClientFromPool(): Promise<MilvusClient> {
+    return await this.connectionPool.acquire();
   }
 
   async searchVectors(params: VectorSearchParams): Promise<any[]> {
@@ -74,13 +80,13 @@ export class VectorOperations {
       offset = 0, 
       filter, 
       tierType,
-      nq = 1 // Add default value
+      nq = 1
     } = params;
   
     const searchParams = {
       collection_name: collection,
       vectors: [vector],
-      nq: nq, // Use the parameter value instead of hardcoding
+      nq: nq,
       search_params: tierType ? 
         this.searchParamsByTier[tierType] : 
         this.searchParamsByTier.core,
@@ -90,11 +96,11 @@ export class VectorOperations {
     };
   
     try {
-      const response = await this.client.search(searchParams);
+      const client = await this.getClientFromPool();
+      const response = await client.search(searchParams);
       return this.processSearchResults(response.results);
     } catch (error) {
-      console.error('Error in vector search:', error);
-      throw error;
+      throw new MilvusOperationError('Vector search failed', error);
     }
   }
 

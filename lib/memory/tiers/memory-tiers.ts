@@ -1,5 +1,22 @@
 import { MemoryTierType } from '../memory-schemas';
 
+class AsyncLock {
+  private locks: Map<string, boolean> = new Map();
+
+  acquire(key: string, callback: () => void): void {
+    if (!this.locks.has(key) || !this.locks.get(key)) {
+      this.locks.set(key, true);
+      callback();
+    } else {
+      setTimeout(() => this.acquire(key, callback), 10);
+    }
+  }
+
+  release(key: string): void {
+    this.locks.set(key, false);
+  }
+}
+
 interface Memory {
   id: string;
   tierType: MemoryTierType;
@@ -59,25 +76,46 @@ export class MemoryTierManager {
   private tiers: Map<MemoryTierType, MemoryTier> = new Map();
   private stats: Map<MemoryTierType, TierStats> = new Map();
   private transitionRules!: Record<MemoryTierType, TierTransitionRules>;
+  private tierLock = new AsyncLock();
+
+  private async acquireLock(memoryId: string): Promise<void> {
+    return new Promise((resolve) => {
+      this.tierLock.acquire(memoryId, resolve);
+    });
+  }
 
   constructor(config: TierConfig) {
+    this.validateTierConfig(config);
+    this.initializeTiers(config);
+    this.initializeStats();
+    this.initializeTransitionRules();
+  }
+
+  private validateTierConfig(config: TierConfig): void {
     if (!config?.tiers) {
       throw new Error('Memory configuration must include tiers property');
     }
 
-    const requiredTiers = ['core', 'active', 'background'] as const;
-    for (const tier of requiredTiers) {
+    const tiers = ['core', 'active', 'background'] as const;
+    for (const tier of tiers) {
       if (!config.tiers[tier]?.maxCapacity) {
         throw new Error(`Invalid tier configuration: missing ${tier}.maxCapacity`);
       }
       if (config.tiers[tier].maxCapacity <= 0) {
         throw new Error(`Invalid tier configuration: ${tier}.maxCapacity must be positive`);
       }
+      if (config.tiers[tier].retentionPeriod && config.tiers[tier].retentionPeriod! <= 0) {
+        throw new Error(`Invalid tier configuration: ${tier}.retentionPeriod must be positive`);
+      }
+      if (config.tiers[tier].promotionThreshold && 
+          (config.tiers[tier].promotionThreshold! < 0 || config.tiers[tier].promotionThreshold! > 1)) {
+        throw new Error(`Invalid tier configuration: ${tier}.promotionThreshold must be between 0 and 1`);
+      }
+      if (config.tiers[tier].demotionThreshold && 
+          (config.tiers[tier].demotionThreshold! < 0 || config.tiers[tier].demotionThreshold! > 1)) {
+        throw new Error(`Invalid tier configuration: ${tier}.demotionThreshold must be between 0 and 1`);
+      }
     }
-
-    this.initializeTiers(config);
-    this.initializeStats();
-    this.initializeTransitionRules();
   }
 
   private initializeTiers(config: TierConfig): void {
@@ -238,6 +276,37 @@ export class MemoryTierManager {
   public updateTierStats(tierType: MemoryTierType, updates: Partial<TierStats>): void {
     const currentStats = this.stats.get(tierType)!;
     this.stats.set(tierType, { ...currentStats, ...updates });
+  }
+
+  private async getCurrentTier(memoryId: string): Promise<MemoryTierType> {
+    // Implementation to get current tier from storage
+    return 'core'; // Placeholder
+  }
+
+  private async performTierTransition(memory: Memory, newTier: MemoryTierType): Promise<void> {
+    // Implementation for tier transition logic
+  }
+
+  public async transitionTier(memory: Memory, newTier: MemoryTierType): Promise<void> {
+    if (!this.tiers.has(newTier)) {
+      throw new Error(`Invalid tier: ${newTier}`);
+    }
+
+    await this.acquireLock(memory.id);
+    try {
+      const currentTier = await this.getCurrentTier(memory.id);
+      if (currentTier !== memory.tierType) {
+        throw new Error('Tier mismatch detected');
+      }
+      
+      if (!await this.validateTierTransition(memory, newTier)) {
+        throw new Error(`Invalid tier transition from ${currentTier} to ${newTier}`);
+      }
+
+      await this.performTierTransition(memory, newTier);
+    } finally {
+      this.tierLock.release(memory.id);
+    }
   }
 
   public async validateTierTransition(

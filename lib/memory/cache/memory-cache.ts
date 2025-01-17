@@ -33,6 +33,16 @@ export class MemoryCache {
   private caches!: Record<MemoryTierType, LRUCache<string, any>>;
   private stats!: CacheStats;
   private config: CacheConfig;
+  private maxAge: number = 24 * 60 * 60 * 1000; // Default 24 hours
+
+  private async getFromMainStorage(key: string): Promise<any> {
+    // Implementation depends on main storage system
+    throw new Error('getFromMainStorage not implemented');
+  }
+
+  private compareEntries(cached: any, main: any): boolean {
+    return JSON.stringify(cached) === JSON.stringify(main);
+  }
 
   constructor(config?: Partial<CacheConfig>) {
     this.config = {
@@ -51,6 +61,12 @@ export class MemoryCache {
 
     this.initializeCaches();
     this.initializeStats();
+  }
+
+  private async validateCacheEntry(key: string, value: any): Promise<boolean> {
+    if (!value) return false;
+    const mainStorage = await this.getFromMainStorage(key);
+    return this.compareEntries(value, mainStorage);
   }
 
   private initializeCaches(): void {
@@ -237,5 +253,16 @@ export class MemoryCache {
 
   public async isCached(id: string, tier: MemoryTierType): Promise<boolean> {
     return this.caches[tier].has(id);
+  }
+
+  private async cleanupCache(): Promise<void> {
+    const now = Date.now();
+    for (const [tier, cache] of Object.entries(this.caches)) {
+      for (const [key, entry] of cache.entries()) {
+        if (now - entry.timestamp > this.maxAge) {
+          cache.delete(key);
+        }
+      }
+    }
   }
 }

@@ -1,5 +1,8 @@
 import { MilvusClient } from '@zilliz/milvus2-sdk-node';
 import { MemoryTier, MemoryTierManager } from '../memory/tiers/memory-tiers';
+import { PrismaClient, Prisma } from '@prisma/client';
+
+const prisma = new PrismaClient();
 import { MemoryCompression } from '../memory/compression/memory-compression';
 import { MemoryCache } from './cache/memory-cache';
 import { MemoryConsolidator } from './consolidation/memory-consolidator';
@@ -160,32 +163,57 @@ export class MemoryService {
   }
 
   async store(memory: Partial<Memory>): Promise<string> {
-    const importance = await this.scoreMemoryImportance(memory);
-    const tierType = this.determineTierType(importance);
-
-    const newMemory: Memory = {
-      id: crypto.randomUUID(),
-      content: memory.content!,
-      embedding: memory.embedding!,
-      timestamp: Date.now(),
-      tierType,
-      importance,
-      lastAccessed: Date.now(),
-      accessCount: 0,
-      metadata: memory.metadata || {}
-    };
-
-    if (tierType === 'core') {
-      await this.cache.setCachedMemory(newMemory.id, newMemory);
+    if (!this.validateMemory(memory)) {
+      throw new Error('Invalid memory object');
     }
 
-    const compressed = await this.compression.compressMemory(newMemory);
-    await this.milvusClient.insert({
-      collection_name: `memory_${tierType}`,
-      data: compressed
-    });
+    return await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      try {
+        // Validate memory before processing
+        if (!memory.content || !memory.embedding) {
+          throw new Error('Missing required memory fields');
+        }
 
-    return newMemory.id;
+        // Score memory importance
+        const importance = await this.scoreMemoryImportance(memory);
+        const tierType = this.determineTierType(importance);
+
+        // Create new memory object
+        const newMemory: Memory = {
+          id: crypto.randomUUID(),
+          content: memory.content,
+          embedding: memory.embedding,
+          timestamp: Date.now(),
+          tierType,
+          importance,
+          lastAccessed: Date.now(),
+          accessCount: 0,
+          metadata: memory.metadata || {}
+        };
+
+        // Cache core memories
+        if (tierType === 'core') {
+          await this.cache.setCachedMemory(newMemory.id, newMemory);
+        }
+
+        // Compress and store memory
+        const compressed = await this.compression.compressMemory(newMemory);
+        const insertResult = await this.milvusClient.insert({
+          collection_name: `memory_${tierType}`,
+          data: compressed
+        });
+
+        // Verify successful insertion
+        if (!insertResult.inserted_ids || insertResult.inserted_ids.length === 0) {
+          throw new Error('Failed to insert memory into Milvus');
+        }
+
+        return newMemory.id;
+      } catch (error) {
+        console.error('Transaction failed:', error);
+        throw new Error(`Memory storage failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
+    });
   }
 
   async retrieve(query: string, limit: number = 5): Promise<Memory[]> {
@@ -256,12 +284,56 @@ export class MemoryService {
     return Math.min(accessCount / 100, 1);
   }
 
+  private validateMetadata(metadata?: Memory['metadata']): boolean {
+    if (!metadata) return true;
+    // Basic validation for metadata structure
+    return typeof metadata === 'object' && metadata !== null;
+  }
+
+  private validateMemory(memory: Partial<Memory>): boolean {
+    const requiredFields: (keyof Memory)[] = ['content', 'embedding', 'timestamp'];
+    const hasRequiredFields = requiredFields.every(field => {
+      const value = memory[field];
+      return value !== undefined && value !== null;
+    });
+    const hasValidMetadata = this.validateMetadata(memory.metadata);
+    return hasRequiredFields && hasValidMetadata;
+  }
+
+  private lock = new Map<string, Promise<void>>();
+
   private async updateAccessMetrics(memories: Memory[]): Promise<void> {
-    for (const memory of memories) {
-      memory.lastAccessed = Date.now();
-      memory.accessCount++;
-      await this.store(memory);
-    }
+    await Promise.all(memories.map(async memory => {
+      // Create a lock for this memory ID if it doesn't exist
+      if (!this.lock.has(memory.id)) {
+        this.lock.set(memory.id, Promise.resolve());
+      }
+
+      // Get the current lock promise
+      const currentLock = this.lock.get(memory.id)!;
+
+      // Create a new promise that will resolve when we're done
+      let resolveLock: () => void;
+      const newLock = new Promise<void>(resolve => {
+        resolveLock = resolve;
+      });
+
+      // Update the lock map with our new lock
+      this.lock.set(memory.id, newLock);
+
+      // Wait for the previous operation to complete
+      await currentLock;
+
+      try {
+        // Update the memory metrics
+        memory.lastAccessed = Date.now();
+        memory.accessCount++;
+        await this.store(memory);
+      } finally {
+        // Release the lock
+        resolveLock!();
+      }
+    }));
   }
 
   private async searchTier(

@@ -2,7 +2,19 @@ import { MemoryService } from '../memory/memory-service';
 import { MemoryTierType } from '../memory/memory-schemas';
 import { MemoryEvolution } from '../memory/evolution/memory-evolution';
 import { MemoryConsolidator } from '../memory/consolidation/memory-consolidator';
-import { MEMORY_CONFIG } from '../../config/memory-config';
+import { MemoryConfig } from '../../config/memory-config';
+
+interface ExtendedMemoryService extends MemoryService {
+  logError(error: Error): Promise<void>;
+  verifyIntegrity(): Promise<void>;
+  rebuildIndexes(): Promise<void>;
+  getStaleMemories(
+    maxAge: number,
+    demotionThreshold: number,
+    batchSize: number,
+    offset: number
+  ): Promise<Memory[]>;
+}
 
 
 
@@ -30,7 +42,7 @@ interface Memory {
 }
 
 export class MemoryManager {
-  private memoryService: MemoryService;
+  private memoryService: ExtendedMemoryService;
   private evolution: MemoryEvolution;
   private consolidator: MemoryConsolidator;
   private stats: MemoryStats;
@@ -38,9 +50,10 @@ export class MemoryManager {
   private lastConsolidationTime: number;
 
   constructor(
-    memoryService: MemoryService,
-    config: MemoryConfig = MEMORY_CONFIG
+    memoryService: ExtendedMemoryService,
+    config: MemoryConfig = new MemoryConfig()
   ) {
+    this.validateConfig(config);
     this.memoryService = memoryService;
     this.evolution = new MemoryEvolution(config);
     this.consolidator = new MemoryConsolidator(config);
@@ -60,14 +73,46 @@ export class MemoryManager {
 
   async processMemories(): Promise<void> {
     try {
-      await this.updateStats();
-      await this.checkConsolidationTriggers();
-      await this.evolveMemories();
-      await this.manageTiers();
-      await this.cleanup();
+      await this.retryWithBackoff(async () => {
+        await this.updateStats();
+        await this.checkConsolidationTriggers();
+        await this.evolveMemories();
+        await this.manageTiers();
+        await this.cleanup();
+      });
+    } catch (error: unknown) {
+      if (error instanceof Error) {
+        await this.handleProcessingError(error);
+      } else {
+        await this.handleProcessingError(new Error(String(error)));
+      }
+    }
+  }
+
+  private async retryWithBackoff(operation: () => Promise<void>, retries = 3, delay = 1000): Promise<void> {
+    try {
+      await operation();
     } catch (error) {
-      console.error('Error in memory processing:', error);
+      if (retries > 0) {
+        await new Promise(resolve => setTimeout(resolve, delay));
+        return this.retryWithBackoff(operation, retries - 1, delay * 2);
+      }
       throw error;
+    }
+  }
+
+  private async handleProcessingError(error: Error): Promise<void> {
+    console.error('Memory processing failed:', error);
+    await this.memoryService.logError(error);
+    await this.recoverFromError();
+  }
+
+  private async recoverFromError(): Promise<void> {
+    try {
+      await this.memoryService.verifyIntegrity();
+      await this.memoryService.rebuildIndexes();
+    } catch (error) {
+      console.error('Error during recovery:', error);
     }
   }
 
@@ -161,12 +206,37 @@ export class MemoryManager {
   }
 
   private calculateRecencyScore(timestamp: number): number {
+    const evolutionConfig = this.config.getEvolutionConfig();
+    if (!evolutionConfig?.agingRate) {
+      throw new Error('Invalid evolution configuration: missing agingRate');
+    }
     const age = Date.now() - timestamp;
-    return Math.exp(-age / this.config.getEvolutionConfig().agingRate);
+    return Math.exp(-age / evolutionConfig.agingRate);
   }
   
   private calculateAccessFrequencyScore(accessCount: number): number {
-    return Math.min(accessCount / this.config.getConsolidationConfig().maxAccessCount, 1);
+    const consolidationConfig = this.config.getConsolidationConfig();
+    if (!consolidationConfig?.maxAccessCount) {
+      throw new Error('Invalid consolidation configuration: missing maxAccessCount');
+    }
+    return Math.min(accessCount / consolidationConfig.maxAccessCount, 1);
+  }
+
+  private validateConfig(config: MemoryConfig): void {
+    const requiredMethods: (keyof MemoryConfig)[] = [
+      'getCacheConfig',
+      'getIndexConfig',
+      'getValidationConfig',
+      'getEvolutionConfig',
+      'getConsolidationConfig',
+      'getTierConfig'
+    ];
+
+    for (const method of requiredMethods) {
+      if (typeof config[method] !== 'function') {
+        throw new Error(`Invalid config: missing required method ${method}`);
+      }
+    }
   }
 
   private async evaluateConsolidationNeed(): Promise<boolean> {
@@ -201,17 +271,33 @@ export class MemoryManager {
   }
 
   private async cleanupStaleMemories(): Promise<void> {
-    const evolutionConfig = this.config.getEvolutionConfig();
-    const memories = await this.memoryService.getMemories();
+    const batchSize = 100;
+    let processed = 0;
     
-    for (const memory of memories) {
-      const age = Date.now() - memory.timestamp;
-      if (age > evolutionConfig.maxAge && 
-          memory.importance < evolutionConfig.demotionThreshold) {
-        await this.memoryService.delete(memory.id);
-        this.stats.totalMemories--;
-        this.stats.tierDistribution[memory.tierType]--;
-      }
+    while (true) {
+      const batch = await this.getStaleMemoryBatch(batchSize, processed);
+      if (batch.length === 0) break;
+      
+      await this.processStaleBatch(batch);
+      processed += batch.length;
+    }
+  }
+
+  private async getStaleMemoryBatch(batchSize: number, offset: number): Promise<Memory[]> {
+    const evolutionConfig = this.config.getEvolutionConfig();
+    return this.memoryService.getStaleMemories(
+      evolutionConfig.maxAge,
+      evolutionConfig.demotionThreshold,
+      batchSize,
+      offset
+    );
+  }
+
+  private async processStaleBatch(batch: Memory[]): Promise<void> {
+    for (const memory of batch) {
+      await this.memoryService.delete(memory.id);
+      this.stats.totalMemories--;
+      this.stats.tierDistribution[memory.tierType]--;
     }
   }
 

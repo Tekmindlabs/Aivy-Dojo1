@@ -234,6 +234,26 @@ export class MemoryConfig {
       clusterSize <= this.config.consolidation.maxClusterSize
     );
   }
+
+  public getCacheConfig() {
+    return {
+      enabled: true,
+      ttl: this.config.tiers.core.ttl
+    };
+  }
+
+  public getIndexConfig() {
+    return {
+      rebuildInterval: 24 * 60 * 60 * 1000 // 24 hours
+    };
+  }
+
+  public getValidationConfig() {
+    return {
+      enabled: true,
+      strictMode: false
+    };
+  }
 }
 
 // Helper function
