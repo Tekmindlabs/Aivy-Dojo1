@@ -112,13 +112,19 @@ export class HybridAgent {
       const searchWrapper = new MilvusSearchWrapper(client);
 
       // 4. Perform vector search with correct typing
-      const searchResults = await searchWrapper.search({
-        collection: 'memories',
-        vector: messageEmbedding,
-        limit: 5,
-        tierType: 'core',
-        nq: 1  // Add this line - specifies that we're doing a single query
-      });
+const searchParams = {
+  collection_name: 'memories',
+  vectors: [messageEmbedding],
+  nq: 1,
+  limit: 5,
+  output_fields: ['*'],
+  params: {
+    nprobe: 10,
+    ef: 64
+  }
+};
+
+const searchResults = await searchWrapper.search(searchParams);
 
       // 5. Process emotional state
       const emotionalResponse = await this.emotionalAgent(state);

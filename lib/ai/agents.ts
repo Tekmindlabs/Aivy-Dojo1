@@ -39,6 +39,7 @@ export interface AgentState {
 }
 
 export interface HybridState extends AgentState {
+  userId: string;
   reactSteps: ReActStep[];
 }
 // Response interface extending the base state
@@ -114,6 +115,7 @@ export const createEmotionalAgent = (model: any) => {
 
 // Export type for hybrid agent
 export interface HybridState extends AgentState {
+  userId: string;
   reactSteps: ReActStep[];
 }
 

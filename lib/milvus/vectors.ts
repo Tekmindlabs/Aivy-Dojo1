@@ -31,7 +31,7 @@ const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
   }
 };
 
-interface VectorSearchParams {
+export interface VectorSearchParams {
   collection: string;
   vector: number[];
   limit?: number;
@@ -92,7 +92,12 @@ export class VectorOperations {
         this.searchParamsByTier.core,
       limit,
       offset,
-      filter
+      filter,
+      output_fields: ['*'],
+      params: {
+        nprobe: 10,
+        ef: 64
+      }
     };
   
     try {

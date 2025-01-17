@@ -4,7 +4,8 @@ import { authConfig } from "@/lib/auth/config";
 import { StreamingTextResponse, LangChainStream } from 'ai';
 import { prisma } from "@/lib/prisma";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { createHybridAgent, HybridState } from '@/lib/ai/hybrid-agent';
+import { createHybridAgent } from '@/lib/ai/hybrid-agent';
+import { HybridState } from '@/lib/ai/agents';
 import { AgentState, ReActStep, EmotionalState } from '@/lib/ai/agents';
 import { Message } from '@/types/chat';
 import { MemoryService } from '@/lib/memory/memory-service';
@@ -127,10 +128,17 @@ export async function POST(req: NextRequest) {
 
     // Retrieve relevant memories
     currentStep = STEPS.AGENT;
-    const memoryContext = await memoryService.retrieve(
-      lastMessage.content,
-      5
-    );
+    // Retrieve and process search results
+const memoryContext = await memoryService.retrieve(
+  lastMessage.content,
+  5
+).then(results => {
+  return results.map(result => ({
+    ...result,
+    relevance: result.metadata?.context_relevance || 0,
+    processedContent: result.content.trim()
+  }));
+});
 
     // Process with hybrid agent
     const initialState: HybridState = {
