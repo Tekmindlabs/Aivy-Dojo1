@@ -39,6 +39,7 @@ export interface MemoryMetadata {
     userId?: string;
     sessionId?: string;
     interactionType?: string;
+    learningStyle?: string;
   };
   processingMetadata?: {
     compressionRatio?: number;
@@ -220,16 +221,16 @@ export const COLLECTION_PARAMS: Record<MemoryTier, {
 
 // Utility functions for schema operations with proper typing
 export const SchemaUtils = {
-  validateMemory: (memory: any, tierType: MemoryTierType) => {
+  validateMemory: (memory: any, tierType: MemoryTier) => {
     const schema = COLLECTION_PARAMS[tierType].schema;
     // Add validation implementation
   },
 
-  getSchemaForTier: (tierType: MemoryTierType): BaseMemorySchema => {
+  getSchemaForTier: (tierType: MemoryTier): BaseMemorySchema => {
     return COLLECTION_PARAMS[tierType].schema;
   },
 
-  isValidTierType: (tierType: string): tierType is MemoryTierType => {
+  isValidTierType: (tierType: string): tierType is MemoryTier => {
     return Object.values(MemoryTier).includes(tierType as MemoryTier);
   }
 };

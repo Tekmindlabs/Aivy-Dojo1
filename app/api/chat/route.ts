@@ -25,7 +25,7 @@ const calculateImportance = (response: any): number => {
 };
 
 // Type definitions
-interface ChatMetadata {
+export interface ChatMetadata {
   [key: string]: any; // Add index signature
   emotionalState: EmotionalState | null;
   reactSteps: Array<{

@@ -4,8 +4,8 @@ import { MemoryCompression } from '../memory/compression/memory-compression';
 import { MemoryCache } from './cache/memory-cache';
 import { MemoryConsolidator } from './consolidation/memory-consolidator';
 import { MEMORY_CONFIG } from '../../config/memory-config';
-
-export type MemoryTierType = 'core' | 'active' | 'background';
+import { MemoryErrorCodes } from './errors/memory-errors';
+import { MemoryTierType } from './memory-schemas';
 
 export interface Memory {
   // Required core fields
@@ -94,15 +94,15 @@ export class MemoryService {
       compressionLevel: 6, // You can make this configurable if needed
       optimizationThreshold: config.compression.targetRatio,
       tierSpecificSettings: {
-        core: {
+      CORE: {
           compressionRatio: config.tiers.core.compressionRatio || 1.0,
           retentionPeriod: config.tiers.core.ttl
         },
-        active: {
+        ACTIVE: {
           compressionRatio: config.tiers.active.compressionRatio || 0.8,
           retentionPeriod: config.tiers.active.ttl
         },
-        background: {
+        BACKGROUND: {
           compressionRatio: config.tiers.background.compressionRatio || 0.6,
           retentionPeriod: config.tiers.background.ttl
         }
@@ -139,7 +139,7 @@ export class MemoryService {
   }
 
   async delete(id: string): Promise<void> {
-    for (const tier of ['core', 'active', 'background'] as MemoryTierType[]) {
+    for (const tier of [MemoryTier.CORE, MemoryTier.ACTIVE, MemoryTier.BACKGROUND] as const) {
       await this.milvusClient.delete({
         collection_name: `memory_${tier}`,
         expr: `id == "${id}"`
@@ -191,7 +191,7 @@ export class MemoryService {
   async retrieve(query: string, limit: number = 5): Promise<Memory[]> {
     const results: Memory[] = [];
     
-    for (const tier of ['core', 'active', 'background'] as MemoryTierType[]) {
+    for (const tier of [MemoryTier.CORE, MemoryTier.ACTIVE, MemoryTier.BACKGROUND] as const) {
       const tierResults = await this.searchTier(tier, query, limit - results.length);
       results.push(...tierResults);
       
@@ -229,7 +229,7 @@ export class MemoryService {
       await this.updateCoreMemoryCache(consolidatedMemories);
   
     } catch (error) {
-      throw new MemoryServiceError(
+      throw new MemoryService(
         'Memory consolidation failed',
         MemoryErrorCodes.CONSOLIDATION_FAILED,
         { originalError: error }
@@ -238,7 +238,7 @@ export class MemoryService {
   }
 
   private async updateCoreMemoryCache(memories: Memory[]): Promise<void> {
-    const coreMemories = memories.filter(m => m.tierType === MemoryTier.CORE);
+    const coreMemories = memories.filter(m => m.tierType === 'core');
     await Promise.all(
       coreMemories.map(memory => this.cache.setCachedMemory(memory.id, memory))
     );
@@ -324,14 +324,14 @@ private processSearchResults(response: any): Memory[] {
 }
 
   private determineTierType(importance: number): MemoryTierType {
-    if (importance >= 0.8) return 'core';
-    if (importance >= 0.4) return 'active';
-    return 'background';
+    if (importance >= 0.8) return MemoryTier.CORE;
+    if (importance >= 0.4) return MemoryTier.ACTIVE;
+    return MemoryTier.BACKGROUND;
   }
 
   private async getAllMemories(): Promise<Memory[]> {
     const memories: Memory[] = [];
-    for (const tier of ['core', 'active', 'background'] as MemoryTierType[]) {
+    for (const tier of [MemoryTier.CORE, MemoryTier.ACTIVE, MemoryTier.BACKGROUND] as const) {
       const tierMemories = await this.milvusClient.query({
         collection_name: `memory_${tier}`,
         expr: ""
